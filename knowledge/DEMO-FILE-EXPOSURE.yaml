@@ -1,0 +1,22 @@
+id: DEMO-FILE-EXPOSURE
+title: Local fixture demonstrating an unintentionally public canary file
+product: Python HTTP server demo
+root_cause: "Synthetic demonstration only: the canary file is placed inside the directory served publicly by the demo HTTP server."
+affected_versions: ["demo configuration only; not a CVE"]
+dependencies: ["Docker Engine", "Docker Compose v2", "python:3.11.11-alpine"]
+prerequisites: ["Loopback port 18081 available", "Canary file is in the public directory"]
+sources: ["environments/file-exposure.md"]
+environment: environments/file-exposure.md
+service: web
+port: 18081
+purpose: demo
+health:
+  id: health
+  path: /
+  expected_status: 200
+reproduction:
+  - id: public_canary
+    path: /canary.txt
+    expected_status: 200
+    body_contains: LOCAL_LAB_CANARY_7f42
+    retry_safe: true

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-vulnerability-reproduction-workflow"
+version = "0.1.0"
+description = "A staged LangGraph workflow for authorized local vulnerability reproduction experiments."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "PyYAML>=6,<7",
+    "langgraph>=0.2,<2",
+    "langchain-openai>=0.2,<2",
+    "pydantic>=2,<3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9"]
+local-rag = ["sentence-transformers>=3,<6"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
