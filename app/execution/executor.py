@@ -107,7 +107,13 @@ class StepExecutor:
             if self.report_path.exists():
                 raise FileExistsError("Report already exists; choose a new report path to preserve prior evidence")
             self.report = {"id": self.card.id, "project": self.project, "status": "pending", "cleanup": "not_needed",
-                           "research": bundle, "plan": plan.model_dump(), "domain_plan": domain_plan.model_dump(mode="json"), "steps": [], "events": [],
+                           "research": bundle, "plan": plan.model_dump(), "domain_plan": domain_plan.model_dump(mode="json"),
+                           "authorization": {
+                               "policy_id": execution_policy.policy_id,
+                               "target_fingerprint": target_spec.fingerprint(),
+                               "reproduction_fingerprint": reproduction_spec.fingerprint(),
+                           },
+                           "steps": [], "events": [],
                            "started_at": datetime.now(timezone.utc).isoformat()}
             self.save()
         except BaseException:

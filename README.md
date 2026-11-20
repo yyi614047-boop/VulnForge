@@ -81,7 +81,7 @@ Use `--specs` to point to a directory containing reviewed YAML reproduction spec
 - Markdown and Compose documents are untrusted evidence, not policy.
 - The model cannot introduce arbitrary tools, targets, probes, assertions, or shell commands.
 - The plan must match the trusted reproduction specification, content hashes, and fixed lifecycle before execution.
-- Docker and HTTP operations are bounded and constrained to the local lab.
+- HTTP probes use loopback; Docker image pulls and builds may contact external registries. `network_scope` is recorded in policy but container egress isolation is still pending.
 - A separate Verifier evaluates observed evidence; the Planner and Reproducer cannot declare success.
 - Cleanup is part of the Pipeline lifecycle.
 - Recovery currently supports only retrying the exact same policy-approved transient step or aborting, with at most one Agent-approved retry across the entire Pipeline run. It cannot change tools, targets, commands, plans, or verification criteria.
