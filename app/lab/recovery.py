@@ -52,7 +52,7 @@ class Recovery:
                 atomic_json(path, report)
                 pipeline = self.pipeline_factory(knowledge, root / "labs", f"{run_id}-r{number+1}",
                     timeout=self.timeout, docker_engine=self.docker_engine, engine_timeout=self.engine_timeout, auto_port=True,
-                    index_path=root / f"rag-{number+1}.sqlite")
+                    )
                 execution = pipeline.run(identifier, execution_path, engine=engine)
                 row.update(status=execution["status"], cleanup=execution.get("cleanup"))
                 if execution.get("cleanup") not in {"completed", "not_needed"}:
