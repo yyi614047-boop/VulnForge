@@ -19,12 +19,14 @@ from app.environments.docker.engine import DockerEngine
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("identifier", nargs="?", help="Reviewed reproduction specification identifier")
-    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate", "policy-preview", "metasploit-search", "metasploit-assess"], default="run")
+    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate", "policy-preview", "metasploit-search", "metasploit-assess", "metasploit-prepare"], default="run")
     parser.add_argument("--targets", type=Path, default=Path("targets/vulhub"),
                         help="Root of the retained Vulhub target corpus")
     parser.add_argument("--query", help="Search query for target-search")
     parser.add_argument("--cve", help="CVE identifier for Metasploit module discovery")
-    parser.add_argument("--candidate-limit", type=int, default=20, help="Maximum Metasploit candidates to inspect")
+    parser.add_argument("--candidate-limit", type=int, default=1, help="Maximum Metasploit candidates to inspect")
+    parser.add_argument("--target-host", help="Explicit reachable target IP/hostname for Metasploit option preparation")
+    parser.add_argument("--target-port", type=int, help="Target port (defaults to the reviewed reproduction spec port)")
     parser.add_argument("--environment", help="Relative target directory for target-inspect")
     parser.add_argument("--request-file", type=Path, help="JSON ReproductionRequest for request-validate")
     parser.add_argument("--policy-file", type=Path, help="Reviewed JSON ExecutionPolicy required for run")
@@ -105,6 +107,53 @@ def main():
                 "target_id": target.target_id,
                 "candidate_count": len(candidates),
                 "results": results,
+            }, ensure_ascii=False, indent=2))
+        finally:
+            client.close()
+        return
+
+    if args.action == "metasploit-prepare":
+        if not args.identifier:
+            parser.error("--action metasploit-prepare requires a reproduction-spec identifier")
+        if not args.target_host:
+            parser.error("--action metasploit-prepare requires --target-host")
+        if not 1 <= args.candidate_limit <= 100:
+            parser.error("--candidate-limit must be between 1 and 100")
+        catalog = TargetCatalog(args.specs)
+        spec = catalog.get(args.identifier)
+        target = catalog.to_target_spec(spec)
+        cve = args.cve or target.vulnerability_id
+        if not cve:
+            parser.error("Target has no CVE identifier; provide --cve")
+        from app.integrations.metasploit import (
+            MetasploitRPCClient, MetasploitDiscovery, prepare_module_options,
+        )
+        url = os.environ.get("METASPLOIT_RPC_URL", "http://127.0.0.1:55553/api/")
+        username = os.environ.get("METASPLOIT_RPC_USERNAME")
+        password = os.environ.get("METASPLOIT_RPC_PASSWORD")
+        if not username or not password:
+            parser.error("Set METASPLOIT_RPC_USERNAME and METASPLOIT_RPC_PASSWORD")
+        client = MetasploitRPCClient(url, username, password)
+        try:
+            discovery = MetasploitDiscovery(client)
+            candidates = discovery.search_cve(cve, limit=args.candidate_limit)
+            prepared = []
+            for candidate in candidates:
+                metadata = discovery.inspect(candidate)
+                prepared.append({
+                    "candidate": candidate.model_dump(mode="json"),
+                    "prepared_options": prepare_module_options(
+                        candidate, metadata,
+                        target_host=args.target_host,
+                        target_port=args.target_port or spec.port,
+                    ).model_dump(mode="json"),
+                })
+            print(json.dumps({
+                "cve": cve,
+                "target_id": target.target_id,
+                "selection": "first Metasploit search result; not an exploitability claim",
+                "results": prepared,
+                "execution_performed": False,
             }, ensure_ascii=False, indent=2))
         finally:
             client.close()
