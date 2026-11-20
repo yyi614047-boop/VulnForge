@@ -68,13 +68,13 @@ class Pipeline:
         except Exception as exc:
             return {"status": "invalid_plan", "error": str(exc)}
 
-    @state_boundary(reads=['status', 'plan', 'bundle', 'target_spec', 'reproduction_spec'], writes=['status', 'engine', 'error'])
+    @state_boundary(reads=['status', 'plan', 'bundle', 'target_spec', 'reproduction_spec'], writes=['status', 'engine', 'error', 'deployment_ready'])
     def deploy(self, state):
         """Revalidate the canonical plan before starting Docker or target processes."""
         if state.get("status") != "planned":
-            return {}
+            return {"deployment_ready": False}
         if self.execution_policy is None:
-            return {"status": "policy_denied", "error": "ExecutionPolicy is required before deployment"}
+            return {"status": "policy_denied", "error": "ExecutionPolicy is required before deployment", "deployment_ready": False}
         try:
             plan = ExecutionPlan.model_validate(state["plan"])
             target = TargetSpec.model_validate(state["target_spec"])
@@ -88,7 +88,7 @@ class Pipeline:
             }:
                 raise PermissionError("Plan provenance changed after planning")
         except Exception as exc:
-            return {"status": "policy_denied", "error": str(exc)}
+            return {"status": "policy_denied", "error": str(exc), "deployment_ready": False}
         engine = {}
         try:
             self.executor.open(plan, state["bundle"], execution_policy=self.execution_policy,
@@ -97,22 +97,32 @@ class Pipeline:
             if self.docker_engine is not None:
                 engine = self.docker_engine.ensure(EngineParams(timeout=self.engine_timeout)).evidence
                 if not engine["ready"]:
+                    message = engine.get("error", engine.get("last_probe_error", "Docker engine unavailable"))
+                    self.executor.report.update(status="environment_error", error=message)
+                    self.executor.save()
                     return {"status": "environment_error", "engine": engine,
-                            "error": engine.get("error", engine.get("last_probe_error", "Docker engine unavailable"))}
+                            "error": message, "deployment_ready": False}
             if engine:
                 self.executor.report["engine"] = engine
                 self.executor.save()
             self.executor.execute_phase("deploy")
-            return {"status": self.executor.report["status"]}
+            ready = self.executor.report["status"] == "pending"
+            return {"status": self.executor.report["status"], "deployment_ready": ready}
         except PermissionError as exc:
-            return {"status": "policy_denied", "error": str(exc), "engine": engine}
+            if self.active and self.executor.report is not None:
+                self.executor.report.update(status="policy_denied", error=str(exc))
+                self.executor.save()
+            return {"status": "policy_denied", "error": str(exc), "engine": engine, "deployment_ready": False}
         except Exception as exc:
-            return {"status": "environment_error", "error": str(exc), "engine": engine}
+            if self.active and self.executor.report is not None:
+                self.executor.report.update(status="environment_error", error=str(exc))
+                self.executor.save()
+            return {"status": "environment_error", "error": str(exc), "engine": engine, "deployment_ready": False}
 
-    @state_boundary(reads=['status', 'plan', 'bundle', 'target_spec', 'reproduction_spec'], writes=['status', 'poc_execution', 'error'])
+    @state_boundary(reads=['status', 'deployment_ready', 'plan', 'bundle', 'target_spec', 'reproduction_spec'], writes=['status', 'poc_execution', 'error'])
     def metasploit(self, state):
         """在本地实验范围内执行已审批的 Metasploit 候选。"""
-        if not self.active or self.executor.report.get("status") != "pending":
+        if state.get("deployment_ready") is not True or not self.active or self.executor.report.get("status") != "pending":
             return {}
         plan = ExecutionPlan.model_validate(state["plan"])
         if not plan.selected_poc_candidate_id:
@@ -145,18 +155,18 @@ class Pipeline:
             self.executor.save()
             return {"status": "execution_error", "error": str(exc)}
 
-    @state_boundary(reads=['status'], writes=['status'])
+    @state_boundary(reads=['status', 'deployment_ready'], writes=['status'])
     def reproduce(self, state):
         """执行复现阶段中的脚本或 HTTP 请求。"""
-        if self.active and self.executor.report.get("status") == "pending":
+        if state.get("deployment_ready") is True and self.active and self.executor.report.get("status") == "pending":
             self.executor.execute_phase("reproduce")
             return {"status": self.executor.report["status"]}
         return {}
 
-    @state_boundary(reads=[], writes=['status'])
+    @state_boundary(reads=['deployment_ready'], writes=['status'])
     def verification(self, state):
         """执行独立验证步骤并产出成功判据。"""
-        if self.active:
+        if state.get("deployment_ready") is True and self.active:
             self.executor.execute_phase("verify")
             return {"status": self.executor.report["status"]}
         return {}
