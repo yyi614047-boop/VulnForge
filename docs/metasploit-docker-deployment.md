@@ -127,7 +127,7 @@ The Agent may propose a candidate and parameters. Deterministic Python code must
 | --- | --- | --- |
 | 0 | Deployment and RPC health check | Private RPC connectivity, TLS/auth checks, version reporting, no public exposure |
 | 1 | Read-only CVE/module discovery | **Implemented MVP:** RPC login, CVE search, normalized candidates, module info/options inspection; fake-client unit tests. Live RPC smoke test remains pending |
-| 2 | Module inspection | Metadata, target constraints, required options and check support are parsed and validated |
+| 2 | Module inspection and option preparation | **Implemented MVP:** inspect metadata/options, preserve defaults, fill explicit target host/port, report missing required options; automatic Docker endpoint resolution remains pending |
 | 3 | Policy-gated check | Explicit target/option authorization, timeout, side-effect documentation, auditable output |
 | 4 | Policy-gated exploit execution | Explicit approval, isolated attack network, controlled payload/session lifecycle, evidence verification and cleanup |
 | 5 | Isolation hardening | Security tests for cross-network reachability, egress restrictions, credential exposure and Docker API permissions |
