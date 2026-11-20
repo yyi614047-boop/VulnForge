@@ -47,6 +47,7 @@ Python 3.11+, Docker Engine, and Docker Compose v2 are required.
 ```bash
 python -m venv .venv
 python -m pip install -e ".[dev]"
+# or: vulnforge --help
 ```
 
 Configure the model through environment variables:
@@ -63,12 +64,12 @@ On PowerShell use `$env:OPENAI_API_KEY="..."` and `$env:PLANNER_MODEL="gpt-4o"`.
 ## CLI
 
 ```bash
-python -m app.lab.cli --action target-search --query CVE-2021-25646
-python -m app.lab.cli --action target-inspect --environment druid/CVE-2021-25646
-python -m app.lab.cli --action engine --check-only
-python -m app.lab.cli CVE-2021-25646 --action research
-python -m app.lab.cli CVE-2021-25646 --action plan
-python -m app.lab.cli CVE-2021-25646 --action run
+python -m app.cli --action target-search --query CVE-2021-25646
+python -m app.cli --action target-inspect --environment druid/CVE-2021-25646
+python -m app.cli --action engine --check-only
+python -m app.cli CVE-2021-25646 --action research
+python -m app.cli CVE-2021-25646 --action plan
+python -m app.cli CVE-2021-25646 --action run
 ```
 
 Use `--knowledge` to point to a directory containing reviewed executable cards. Use a new report path for each run. The default report location is `reports/<project>.json`.

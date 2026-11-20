@@ -169,21 +169,21 @@ Until that decision is made, keep the verifier interface provider-neutral and do
 
 | Existing module | Target responsibility |
 |---|---|
-| `app/lab/pipeline.py` | `workflows/reproduction/graph.py` |
-| `app/lab/research.py` | `agents/researcher.py` |
-| `app/lab/planning.py` | split between `agents/planner.py` and `domain/plans.py` |
-| `app/lab/step_executor.py` | `execution/executor.py` |
-| `app/lab/recovery_controller.py` | `agents/recovery.py` decision interface |
+| `app/lab/pipeline.py` | `workflows/reproduction/graph.py` (moved; old path is compatibility import) |
+| `app/lab/research.py` | `agents/researcher.py` (moved; old path is compatibility import) |
+| `app/lab/planning.py` | `agents/planner.py` (moved); legacy deployment-plan schema still awaits replacement by `domain/plans.py` |
+| `app/lab/step_executor.py` | `execution/executor.py` (moved; old path is compatibility import) |
+| `app/lab/recovery_controller.py` | `agents/recovery.py` (moved; currently retry/abort only) |
 | `app/lab/recovery.py` | inspect and split into authoring/recovery services; do not blindly move |
-| `app/lab/http.py` | `execution/probes.py` |
-| `app/lab/assets.py` + `app/lab/hashing.py` | `execution/artifacts.py` |
-| `app/lab/ports.py` | `environments/docker/network.py` |
+| `app/lab/http.py` | `execution/probes.py` (moved) |
+| `app/lab/assets.py` + `app/lab/hashing.py` | `execution/artifacts.py` (moved) |
+| `app/lab/ports.py` | `environments/docker/network.py` (moved) |
 | `app/lab/authoring.py` + `environment_authoring.py` | `agents/authoring.py` plus authoring workflow |
 | `app/lab/batch.py` | `workflows/batch.py` |
 | `app/lab/comparison.py` | `evaluation/comparison.py` |
-| `app/tools/docker_engine.py` + `docker_lab.py` | `environments/docker/` and Docker tool adapter |
-| `app/tools/files.py` | filesystem tool adapter / artifact service, depending on call site |
-| `app/lab/knowledge.py` | retire KnowledgeBase/Card abstraction; preserve useful target parsing as TargetSpec/source adapters |
+| `app/tools/docker_engine.py` + `docker_lab.py` | `environments/docker/` (moved; old paths are compatibility imports) |
+| `app/tools/files.py` | `tools/builtin/filesystem.py` (moved; old path is compatibility import) |
+| `app/lab/knowledge.py` | isolated as `targets/vulhub/legacy_cards.py`; full removal awaits request/policy/plan/executor migration |
 
 ## 9. Removal and retention policy
 
