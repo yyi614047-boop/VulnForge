@@ -100,9 +100,9 @@ def test_rpc_client_rejects_invalid_method_and_auth_failure():
     client = MetasploitRpcClient(transport, username="user", password="pass")
     try:
         client.call("console.execute", "arbitrary")
-        assert False, "authentication should fail before method dispatch"
-    except RuntimeError as exc:
-        assert "authentication" in str(exc).lower()
+        assert False, "unapproved RPC method should be rejected"
+    except ValueError as exc:
+        assert "not exposed" in str(exc).lower()
 
 
 def test_rpc_transport_restricts_server_to_loopback():
