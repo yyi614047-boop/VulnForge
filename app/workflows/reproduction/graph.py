@@ -44,7 +44,7 @@ class Pipeline:
         except Exception as exc:
             return {"status": "information_missing", "error": str(exc)}
 
-    @state_boundary(reads=['status', 'bundle', 'identifier'], writes=['plan', 'domain_plan', 'target_spec', 'reproduction_spec', 'status', 'error'])
+    @state_boundary(reads=['status', 'bundle', 'identifier'], writes=['plan', 'target_spec', 'reproduction_spec', 'status', 'error'])
     def plan(self, state):
         """Generate the canonical domain plan against the selected target and policy."""
         if state.get("status") != "researched":
@@ -124,7 +124,7 @@ class Pipeline:
             return {"status": self.executor.report["status"]}
         return {}
 
-    @state_boundary(reads=['identifier', 'status', 'error', 'engine', 'bundle', 'plan', 'domain_plan'], writes=['report', 'status'])
+    @state_boundary(reads=['identifier', 'status', 'error', 'engine', 'bundle', 'plan'], writes=['report', 'status'])
     def cleanup(self, state):
         """清理实验资源并保存最终执行报告。"""
         if self.active:
@@ -135,7 +135,7 @@ class Pipeline:
                            "error": state.get("error"), "cleanup": "not_needed",
                            "engine": state.get("engine"),
                            "research": state.get("bundle"), "plan": state.get("plan"),
-                           "domain_plan": state.get("domain_plan")}}
+                           "plan": state.get("plan")}}
 
     def graph(self):
         """构建 LangGraph 编排图并连接各实验阶段。"""
