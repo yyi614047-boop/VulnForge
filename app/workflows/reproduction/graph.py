@@ -146,7 +146,6 @@ class Pipeline:
             self._metasploit_network_context = (network_name, metasploit_container)
             network_setup = self.executor.lab.prepare_metasploit_container(
                 network_name, metasploit_container,
-                published_rpc_port=int(os.getenv("MSFRPC_PORT", "55553")),
                 container_rpc_port=int(os.getenv("MSFRPC_CONTAINER_PORT", "55553")),
             )
             attestation = self.executor.lab.resolve_target_endpoint(

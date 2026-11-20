@@ -148,9 +148,7 @@ class NetworkSetupRunner:
             return Result(json.dumps([{
                 "Id": "f" * 64,
                 "State": {"Running": True},
-                "HostConfig": {"PortBindings": {
-                    "55553/tcp": [{"HostIp": "127.0.0.1", "HostPort": "15553"}]
-                }},
+                "HostConfig": {"PortBindings": {}},
                 "NetworkSettings": {"Networks": networks},
             }]))
         if argv[:4] in (
@@ -165,7 +163,7 @@ def test_prepare_metasploit_container_moves_bridge_only_container_to_internal_ne
     runner = NetworkSetupRunner()
     lab = make_lab(tmp_path, runner)
     result = lab.prepare_metasploit_container(
-        "lab-shared", "msf", published_rpc_port=15553, container_rpc_port=55553,
+        "lab-shared", "msf", container_rpc_port=55553,
     )
     assert result["changed"] is True
     assert runner.calls[1][:4] == ["docker", "inspect", "msf"]
@@ -175,7 +173,7 @@ def test_prepare_metasploit_container_moves_bridge_only_container_to_internal_ne
     assert runner.calls[5][:3] == ["docker", "inspect", "msf"]
 
 
-def test_prepare_metasploit_container_rejects_rpc_published_on_non_loopback(tmp_path):
+def test_prepare_metasploit_container_rejects_any_published_rpc_port(tmp_path):
     class UnsafeRunner(NetworkSetupRunner):
         def __call__(self, argv, **kwargs):
             if argv[:2] == ["docker", "inspect"]:
@@ -190,9 +188,9 @@ def test_prepare_metasploit_container_rejects_rpc_published_on_non_loopback(tmp_
                 return Result(json.dumps([row]))
             return super().__call__(argv, **kwargs)
     lab = make_lab(tmp_path, UnsafeRunner())
-    with pytest.raises(PermissionError, match="only on the configured host loopback"):
+    with pytest.raises(PermissionError, match="must not be published"):
         lab.prepare_metasploit_container(
-            "lab-shared", "msf", published_rpc_port=15553, container_rpc_port=55553,
+            "lab-shared", "msf", container_rpc_port=55553,
         )
 
 class NetworkRestoreRunner:

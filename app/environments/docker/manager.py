@@ -321,19 +321,20 @@ class DockerLab:
 
 
     def prepare_metasploit_container(self, network_name: str, container: str, *,
-                                     published_rpc_port: int, container_rpc_port: int = 55553,
+                                     container_rpc_port: int = 55553,
                                      timeout: int = 15) -> dict:
-        """Move an RPC container from the default bridge onto the approved internal lab network.
+        """Move a loopback-only RPC container from default bridge to the approved internal network.
 
-        The RPC port must already be published exclusively on host loopback. Only a
-        container attached solely to Docker default bridge may be moved automatically.
+        RPC is accessed via Docker Exec, so the Metasploit port must not be published on
+        any host interface. Only a container attached solely to Docker default bridge
+        may be moved automatically.
         """
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", network_name):
             raise ValueError("Invalid approved Docker network name")
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", container):
             raise ValueError("Invalid Metasploit container name")
-        if not (1 <= published_rpc_port <= 65535 and 1 <= container_rpc_port <= 65535):
-            raise ValueError("Invalid Metasploit RPC port")
+        if not 1 <= container_rpc_port <= 65535:
+            raise ValueError("Invalid Metasploit container RPC port")
         network_result = self._invoke(["docker", "network", "inspect", network_name], timeout)
         if network_result.returncode:
             raise ToolExecutionError(f"Cannot inspect approved lab network: {network_result.stderr}")
@@ -348,9 +349,8 @@ class DockerLab:
             raise ValueError("Metasploit container must exist and already be running")
         row = rows[0]
         bindings = (row.get("HostConfig", {}).get("PortBindings") or {}).get(f"{container_rpc_port}/tcp") or []
-        if not any(item.get("HostIp") == "127.0.0.1" and str(item.get("HostPort")) == str(published_rpc_port)
-                   for item in bindings if isinstance(item, dict)):
-            raise PermissionError("Metasploit RPC must be published only on the configured host loopback port")
+        if bindings:
+            raise PermissionError("Metasploit RPC must not be published to host interfaces; use Docker Exec transport")
         attached = row.get("NetworkSettings", {}).get("Networks") or {}
         if set(attached) == {network_name}:
             return {"container_id": row.get("Id"), "network_name": network_name, "changed": False}

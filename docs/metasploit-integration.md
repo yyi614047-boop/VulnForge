@@ -99,11 +99,11 @@ A proposal binds one inspected Metasploit exploit to:
 - known module options, with `RHOSTS` and `RPORT` derived from the bound target;
 - the inspected module metadata SHA-256.
 
-The compatibility gate rejects non-Metasploit/non-exploit candidates, uninspected modules, missing or mismatched module CVE references, non-loopback destinations, undeclared ports, unknown option names, caller overrides of `RHOSTS`/`RPORT`, and missing required options.
+The compatibility gate rejects non-Metasploit/non-exploit candidates, uninspected modules, missing or mismatched module CVE references, destinations without a valid Docker internal-network attestation, undeclared target ports, unknown option names, caller overrides of `RHOSTS`/`RPORT`, and missing required options.
 
 **Compatibility remains `unknown` unless independent product/version evidence exists.** Metasploit's target labels and rank are retained as metadata, but are not treated as proof that the module supports the lab's product/version.
 
-The spec always carries `approval_required=true`. This milestone only constructs and validates a review proposal; it does not invoke `check`, `exploit`, RPC, payloads, or sessions. Execution remains blocked until a separately authorized RPC adapter and explicit policy gate are implemented.
+The spec carries explicit candidate and target fingerprints. The Pipeline invokes Check and Execute only after exact candidate metadata approval, target approval, internal-network attestation, and action-specific policy gates pass.
 
 
 ## Policy-gated RPC adapter (fourth milestone)
@@ -114,7 +114,7 @@ The optional `app/execution/metasploit_rpc.py` adapter uses Metasploit's HTTP Me
 pip install -e ".[metasploit]"
 ```
 
-Start the Metasploit Framework RPC daemon bound to loopback, for example:
+Start the Metasploit Framework RPC daemon bound to container loopback (the README contains a Docker Exec example with no published host port):
 
 ```bash
 msfrpcd -U vulnforge -P '<strong-password>' -a 127.0.0.1 -p 55553 -S -f
@@ -122,9 +122,9 @@ msfrpcd -U vulnforge -P '<strong-password>' -a 127.0.0.1 -p 55553 -S -f
 
 Configure credentials through environment variables (never commit them):
 
-- `MSFRPC_HOST=127.0.0.1`
-- `MSFRPC_PORT=55553`
-- `MSFRPC_SSL=true`
+- `MSFRPC_TRANSPORT=docker-exec`
+- `MSF_CONTAINER_NAME` (the running container name)
+- `MSFRPC_CONTAINER_PORT=55553`
 - `MSFRPC_URI=/api/`
 - `MSFRPC_USER`
 - `MSFRPC_PASS`
@@ -135,7 +135,7 @@ The adapter exposes no arbitrary console/RPC passthrough and the RPC client has 
 3. `module.execute` only when the same adapter instance has recorded that successful check;
 4. inspect newly created sessions and stop only sessions matching the exact target host and exploit module.
 
-The RPC endpoint itself must be loopback. TLS certificate verification is enabled by default. The transport accepts no non-loopback RPC host.
+The daemon binds to 127.0.0.1 inside the Metasploit container. The Docker Exec transport sends bounded MessagePack requests through the Docker daemon to that local endpoint; no RPC host port is published. The alternate HTTP transport remains restricted to host loopback and verifies TLS certificates by default.
 
 ### Additional explicit policy fields
 
@@ -146,8 +146,11 @@ All Metasploit permissions default to disabled. A reviewed policy must include t
 - `allow_unknown_poc_compatibility` (only if the reviewer accepts unknown product/version compatibility)
 - `allow_metasploit_payloads` (only when a reviewed module requires a payload option)
 
-The active policy must also approve the target fingerprint, loopback host, and published port. A changed module metadata hash invalidates candidate approval.
+The active policy must also approve the target fingerprint, target service, target's loopback-published host port, and exact internal Docker network name. The module target address itself is the attested private container IP. A changed module metadata hash invalidates candidate approval.
 
 ### Current limitations
 
-The adapter is wired into the LangGraph Pipeline and CLI. RPC and policy behavior have fake-client unit coverage; the opt-in live Metasploit integration test exercises a harmless custom fixture module against a real Framework RPC daemon. The standard CI job intentionally skips the large Metasploit image pull; run the opt-in test locally or in a dedicated integration runner.
+The adapter is wired into the LangGraph Pipeline and CLI. RPC and policy behavior have fake-client unit coverage. The opt-in live Metasploit integration test exercises a harmless custom fixture module against a real Framework RPC daemon; it is run in the dedicated CI step.
+
+
+The live fixture test starts msfrpcd bound to 127.0.0.1 inside the Metasploit container without a host port mapping. The test client uses Docker Exec to invoke the MessagePack HTTP API on container loopback, preserving the single-network-attachment invariant.

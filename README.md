@@ -120,27 +120,25 @@ Model-backed and Docker-backed integration tests require credentials and local s
 
 ## Live Metasploit RPC run
 
-Install the optional MessagePack dependency and start a local Metasploit RPC container. The RPC listener is published only on host loopback; the Pipeline moves the running container from Docker default bridge to the approved internal lab network after the target Compose project starts.
+Install the optional MessagePack dependency and start a local Metasploit RPC container. The RPC daemon binds only to 127.0.0.1 inside the container. VulnForge sends RPC requests through Docker Exec, so no host port is published and the Metasploit container needs only the approved internal lab network.
 
 ```bash
 python -m pip install -e ".[metasploit]"
 export MSFRPC_USER=vulnforge
 export MSFRPC_PASS='replace-with-a-long-random-password'
-export MSFRPC_HOST=127.0.0.1
-export MSFRPC_PORT=55553
+export MSFRPC_TRANSPORT=docker-exec
 export MSFRPC_CONTAINER_PORT=55553
-export MSFRPC_SSL=false
 export MSF_CONTAINER_NAME=vulnforge-msf
 
 docker run -d --name "$MSF_CONTAINER_NAME" \
-  -p 127.0.0.1:55553:55553 \
+  -v "$PWD/msf-modules:/root/.msf4/modules:ro" \
   --entrypoint ruby metasploitframework/metasploit-framework:latest \
-  msfrpcd -U "$MSFRPC_USER" -P "$MSFRPC_PASS" -a 0.0.0.0 -p 55553 -S -n -f
+  msfrpcd -U "$MSFRPC_USER" -P "$MSFRPC_PASS" -a 127.0.0.1 -p 55553 -S -n -f
 
 python -m app.cli --action metasploit-rpc-version
 ```
 
-The -S flag disables TLS inside this local-only container RPC listener. The host port remains bound to 127.0.0.1; do not publish it on 0.0.0.0 or expose it to the Internet. For remote deployments, configure verified TLS and a private endpoint instead.
+The RPC daemon uses HTTP only on its own container loopback; it is not published to the host or any container network. Docker Exec is the only control path. Do not change the bind address to 0.0.0.0 or publish the RPC port.
 
 Before enabling execution, review a reproduction recipe whose Compose file declares an explicit internal: true network with a stable name. Generate a policy template, then manually add the exact candidate metadata approval and network approval:
 
@@ -169,7 +167,7 @@ python -m app.cli TARGET_ID --specs reproductions --action run \
   --enable-metasploit-execution
 ```
 
-The Pipeline removes the Metasploit container default-bridge attachment, connects it to the approved internal network, and re-inspects both containers before constructing the target attestation. It refuses containers attached to any unexpected network. After execution, it records Check/Execute outcomes and requires the existing independent verifier to pass before reporting success.
+The Pipeline removes the Metasploit container default-bridge attachment, connects it to the approved internal network, restarts the RPC daemon, and re-inspects both containers before constructing the target attestation. It refuses containers attached to any unexpected network. After execution, it records Check/Execute outcomes and requires the existing independent verifier to pass before reporting success.
 
 The optional real-RPC integration test uses a harmless custom Metasploit fixture module and a local HTTP marker server. It does not exploit a real CVE or open a shell:
 

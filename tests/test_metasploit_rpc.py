@@ -301,3 +301,38 @@ def test_execute_reports_session_cleanup_failure_instead_of_claiming_success():
     assert outcome.status == "failed"
     assert outcome.cleaned_session_ids == []
     assert "session stop denied" in outcome.cleanup_errors[0]
+
+def test_docker_exec_transport_roundtrips_messagepack_without_publishing_rpc_port():
+    import base64
+    import subprocess
+    import pytest
+    msgpack = pytest.importorskip("msgpack")
+    from app.execution.metasploit_rpc import DockerExecMessagePackTransport
+
+    class Runner:
+        def __call__(self, argv, **kwargs):
+            assert argv[:4] == ["docker", "exec", "-i", "msf"]
+            request = msgpack.unpackb(kwargs["input"], raw=False)
+            assert request == ["core.version", "session-token"]
+            body = msgpack.packb({"version": "6.4.0"}, use_bin_type=True)
+            return subprocess.CompletedProcess(argv, 0, base64.b64encode(body), b"")
+
+    transport = DockerExecMessagePackTransport("msf", runner=Runner())
+    assert transport.call("core.version", "session-token") == {"version": "6.4.0"}
+
+
+def test_rpc_client_defaults_to_docker_exec_when_msf_container_is_configured(monkeypatch):
+    from app.execution.metasploit_rpc import DockerExecMessagePackTransport
+    monkeypatch.setenv("MSF_CONTAINER_NAME", "msf")
+    monkeypatch.setenv("MSFRPC_USER", "user")
+    monkeypatch.setenv("MSFRPC_PASS", "pass")
+    monkeypatch.delenv("MSFRPC_TRANSPORT", raising=False)
+    client = MetasploitRpcClient.from_env()
+    assert isinstance(client.transport, DockerExecMessagePackTransport)
+
+
+def test_docker_exec_transport_rejects_invalid_container_names():
+    import pytest
+    from app.execution.metasploit_rpc import DockerExecMessagePackTransport
+    with pytest.raises(ValueError, match="container name"):
+        DockerExecMessagePackTransport("bad name")

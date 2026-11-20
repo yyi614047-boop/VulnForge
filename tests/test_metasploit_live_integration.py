@@ -24,7 +24,7 @@ from app.domain.targets import EnvironmentSpec, TargetSource, TargetSpec
 from app.environments.docker.manager import DockerLab, DockerLabParams
 from app.execution.artifacts import digest
 from app.execution.metasploit_rpc import (
-    MessagePackHttpTransport, MetasploitRpcAdapter, MetasploitRpcClient,
+    DockerExecMessagePackTransport, MetasploitRpcAdapter, MetasploitRpcClient,
 )
 from app.workflows.reproduction.metasploit import MetasploitCandidateRunner
 
@@ -116,7 +116,6 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
     network = f"vf-msf-{suffix}"
     msf_name = f"vf-msf-rpc-{suffix}"
     target_host_port = 18080 + int(suffix[:3], 16) % 1000
-    rpc_host_port = 15553 + int(suffix[3:6], 16) % 1000
     msf_image = os.getenv("VULNFORGE_MSF_TEST_IMAGE", "metasploitframework/metasploit-framework:latest")
     target_image = "python:3.11-alpine"
     password = "vf-test-" + uuid4().hex
@@ -155,10 +154,9 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
 
         started = docker(
             "run", "-d", "--name", msf_name,
-            "-p", f"127.0.0.1:{rpc_host_port}:55553/tcp",
             "-v", f"{module_root}:/root/.msf4/modules:ro",
             "--entrypoint", "ruby", msf_image, "msfrpcd",
-            "-U", "vulnforge", "-P", password, "-a", "0.0.0.0",
+            "-U", "vulnforge", "-P", password, "-a", "127.0.0.1",
             "-p", "55553", "-S", "-n", "-f",
             timeout=180,
         )
@@ -166,7 +164,7 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
         msf_started = True
 
         lab.prepare_metasploit_container(
-            network, msf_name, published_rpc_port=rpc_host_port, container_rpc_port=55553,
+            network, msf_name, container_rpc_port=55553,
         )
         endpoint = lab.resolve_target_endpoint(
             "web", target_host_port, network_name=network, metasploit_container=msf_name,
@@ -193,9 +191,7 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
             )
 
         client = MetasploitRpcClient(
-            MessagePackHttpTransport(
-                host="127.0.0.1", port=rpc_host_port, ssl_enabled=False, timeout=3,
-            ),
+            DockerExecMessagePackTransport(msf_name, port=55553, timeout=10),
             username="vulnforge", password=password,
         )
         version = None

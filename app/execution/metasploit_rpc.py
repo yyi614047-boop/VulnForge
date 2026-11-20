@@ -7,9 +7,11 @@ general-purpose RPC or console passthrough.
 from __future__ import annotations
 
 import ipaddress
+import base64
 import os
 import re
 import ssl
+import subprocess
 import time
 from typing import Callable
 from urllib.error import URLError
@@ -76,6 +78,67 @@ class MessagePackHttpTransport:
         return payload
 
 
+class DockerExecMessagePackTransport:
+    """Send the narrow MessagePack RPC request through docker exec, not a published port.
+
+    The Metasploit daemon binds to 127.0.0.1 inside its container. Docker Exec is the
+    control channel, so the container needs only its single approved internal network.
+    """
+
+    def __init__(self, container: str, *, port: int = 55553, endpoint: str = "/api/",
+                 timeout: int = 15, runner: Callable = subprocess.run):
+        if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", container):
+            raise ValueError("Invalid Metasploit Docker container name")
+        if not 1 <= port <= 65535 or not 1 <= timeout <= 120:
+            raise ValueError("Invalid Metasploit RPC port or timeout")
+        if not endpoint.startswith("/") or ".." in endpoint.split("/"):
+            raise ValueError("RPC endpoint must be an absolute, traversal-free path")
+        self.container, self.port, self.endpoint = container, port, endpoint
+        self.timeout, self.runner = timeout, runner
+
+    def call(self, method: str, *params):
+        try:
+            import msgpack
+        except ImportError as exc:
+            raise RuntimeError(
+                "MessagePack support is optional; install with pip install -e '.[metasploit]'"
+            ) from exc
+        payload = msgpack.packb([method, *params], use_bin_type=True)
+        ruby = f"""
+require 'base64'
+require 'net/http'
+require 'uri'
+uri = URI('http://127.0.0.1:{self.port}{self.endpoint}')
+request = Net::HTTP::Post.new(uri)
+request['Content-Type'] = 'binary/message-pack'
+request['Accept'] = 'binary/message-pack'
+request.body = STDIN.read
+http = Net::HTTP.new(uri.host, uri.port, nil)
+http.open_timeout = {self.timeout}
+http.read_timeout = {self.timeout}
+response = http.start {{ |client| client.request(request) }}
+STDOUT.write(Base64.strict_encode64(response.body))
+"""
+        try:
+            result = self.runner(
+                ["docker", "exec", "-i", self.container, "ruby", "-e", ruby],
+                input=payload, capture_output=True, timeout=self.timeout + 5, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise MetasploitRpcError(f"Docker Exec RPC transport failed: {exc}") from exc
+        if result.returncode:
+            detail = result.stderr.decode("utf-8", errors="replace") if isinstance(result.stderr, bytes) else str(result.stderr)
+            raise MetasploitRpcError(f"Docker Exec RPC transport failed: {detail}")
+        try:
+            encoded = result.stdout.decode("ascii") if isinstance(result.stdout, bytes) else str(result.stdout)
+            response = msgpack.unpackb(base64.b64decode(encoded), raw=False, strict_map_key=False)
+        except Exception as exc:
+            raise MetasploitRpcError(f"Invalid MessagePack response from Metasploit Docker Exec: {exc}") from exc
+        if isinstance(response, dict) and response.get("error"):
+            raise MetasploitRpcError(str(response.get("error_message") or response.get("error_class") or response["error"]))
+        return response
+
+
 class MetasploitRpcClient:
     """Authenticated RPC client with a narrow, explicit API allowlist."""
 
@@ -91,12 +154,22 @@ class MetasploitRpcClient:
     @classmethod
     def from_env(cls, *, transport=None):
         if transport is None:
-            transport = MessagePackHttpTransport(
-                host=os.getenv("MSFRPC_HOST", "127.0.0.1"),
-                port=int(os.getenv("MSFRPC_PORT", "55553")),
-                ssl_enabled=os.getenv("MSFRPC_SSL", "true").lower() in {"1", "true", "yes"},
-                endpoint=os.getenv("MSFRPC_URI", "/api/"),
-            )
+            transport_kind = os.getenv("MSFRPC_TRANSPORT", "docker-exec" if os.getenv("MSF_CONTAINER_NAME") else "http")
+            if transport_kind == "docker-exec":
+                container = os.getenv("MSF_CONTAINER_NAME", "")
+                transport = DockerExecMessagePackTransport(
+                    container, port=int(os.getenv("MSFRPC_CONTAINER_PORT", "55553")),
+                    endpoint=os.getenv("MSFRPC_URI", "/api/"),
+                )
+            elif transport_kind == "http":
+                transport = MessagePackHttpTransport(
+                    host=os.getenv("MSFRPC_HOST", "127.0.0.1"),
+                    port=int(os.getenv("MSFRPC_PORT", "55553")),
+                    ssl_enabled=os.getenv("MSFRPC_SSL", "true").lower() in {"1", "true", "yes"},
+                    endpoint=os.getenv("MSFRPC_URI", "/api/"),
+                )
+            else:
+                raise ValueError("MSFRPC_TRANSPORT must be docker-exec or http")
         return cls(
             transport,
             username=os.environ.get("MSFRPC_USER", ""),
