@@ -21,7 +21,7 @@ from app.lab.documented_card import DocumentedStep, RequestShape
 from app.lab.knowledge import StrictModel
 from app.lab.ports import choose_port
 from app.lab.step_executor import atomic_json
-from app.rag.vulhub_researcher import VulhubResearcher
+from app.lab.vulhub_researcher import VulhubResearcher
 from app.tools.docker_engine import DockerEngine, EngineParams
 from app.tools.vulhub_sources import vulhub_root
 from app.trace import TraceRecorder, emit, traced_call
