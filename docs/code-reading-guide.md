@@ -16,7 +16,7 @@ Read `app/lab/research.py`, `app/lab/planning.py`, and `app/lab/knowledge.py`. R
 
 ## 4. Understand side effects
 
-Read `app/lab/step_executor.py`, `app/tools/docker_lab.py`, `app/tools/docker_engine.py`, `app/tools/registry.py`, and `app/lab/http.py`.
+Read `app/lab/step_executor.py`, `app/lab/recovery_controller.py`, `app/agents/roles/recovery.md`, `app/tools/docker_lab.py`, `app/tools/docker_engine.py`, `app/tools/registry.py`, and `app/lab/http.py`. The Recovery Agent can recommend only retry or abort; the executor enforces retryability and a one-attempt recovery budget.
 
 ## 5. Understand state and model context
 

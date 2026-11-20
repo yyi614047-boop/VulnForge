@@ -6,6 +6,7 @@ from typing import TypedDict
 from app.agent_context import isolated_run, state_boundary
 
 from app.lab.planning import StructuredPlanner
+from app.lab.recovery_controller import RecoveryController
 from app.lab.step_executor import StepExecutor, atomic_json
 from app.lab.research import Researcher
 from app.tools.docker_engine import EngineParams
@@ -30,6 +31,7 @@ class Pipeline:
         self.knowledge, self.workspace, self.project = knowledge, workspace, project
         self.researcher = Researcher(knowledge, llm)
         self.planner = StructuredPlanner(llm)
+        self.recovery_controller = RecoveryController(llm) if llm is not None else None
         self.retries, self.timeout, self.keep = retries, timeout, keep
         self.executor_options = executor_options or {}
         self.executor = None
@@ -171,7 +173,10 @@ class Pipeline:
                 atomic_json(report_path, report)
                 return report
         if self.documented is None:
-            self.executor = StepExecutor(self.knowledge, self.workspace, self.project, report_path, **self.executor_options)
+            executor_options = dict(self.executor_options)
+            executor_options.setdefault("recovery_controller", self.recovery_controller)
+            executor_options.setdefault("recovery_budget", 1 if self.recovery_controller is not None else 0)
+            self.executor = StepExecutor(self.knowledge, self.workspace, self.project, report_path, **executor_options)
         state = {"identifier": identifier}
         try:
             if graph:

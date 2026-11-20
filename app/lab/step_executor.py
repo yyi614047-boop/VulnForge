@@ -44,7 +44,8 @@ class StepFailure(Exception):
 
 class StepExecutor:
     def __init__(self, knowledge: Path, workspace: Path, project: str, report_path: Path,
-                 *, lab_factory=DockerLab.prepare, requester=request, sleeper=None, cancel=None):
+                 *, lab_factory=DockerLab.prepare, requester=request, sleeper=None, cancel=None,
+                 recovery_controller=None, recovery_budget=0):
         """初始化组件及其运行所需的配置、依赖和状态。"""
         # Validate the project before using it in filesystem paths.
         DockerLab(workspace / project / "compose.json", project)
@@ -53,6 +54,9 @@ class StepExecutor:
         self.lab_factory, self.requester = lab_factory, requester
         self.cancel = cancel or Event()
         self.sleeper = sleeper or self.cancel.wait
+        if not 0 <= recovery_budget <= 2:
+            raise ValueError("Recovery budget must be 0..2")
+        self.recovery_controller, self.recovery_budget = recovery_controller, recovery_budget
         self.lab = None
         self.started = False
         self.locks = []
@@ -138,7 +142,9 @@ class StepExecutor:
             self.report["status"] = "cancelled"
             self.save()
             return
-        for number in range(step.max_retries + 1):
+        recovery_attempts = 0
+        total_attempts = step.max_retries + self.recovery_budget + 1
+        for number in range(total_attempts):
             attempt = {"number": number + 1, "started_at": datetime.now(timezone.utc).isoformat(), "status": "running"}
             record["attempts"].append(attempt)
             record["status"] = "running"
@@ -151,10 +157,36 @@ class StepExecutor:
                 return
             except StepFailure as exc:
                 attempt.update(status="failed", error=str(exc), category=exc.category, evidence=exc.evidence)
-                retry = exc.retryable and number < step.max_retries and not self.cancel.is_set()
+                planned_retry = exc.retryable and number < step.max_retries and not self.cancel.is_set()
+                recovery_retry = False
+                if (not planned_retry and exc.retryable and self.recovery_controller is not None
+                        and recovery_attempts < self.recovery_budget and not self.cancel.is_set()):
+                    recovery_attempts += 1
+                    try:
+                        decision = self.recovery_controller.decide(
+                            step=step, failure=exc, attempt=number + 1,
+                            retry_allowed=True, remaining_budget=self.recovery_budget - recovery_attempts + 1,
+                            recent_events=self.report["events"][-10:],
+                        )
+                        recovery_retry = decision.action == "retry"
+                        self.report["events"].append({
+                            "step_id": step.id, "action": "recovery_decision",
+                            "decision": decision.action, "reason": decision.reason,
+                            "attempt": number + 1,
+                        })
+                    except Exception as decision_error:
+                        self.report["events"].append({
+                            "step_id": step.id, "action": "recovery_error",
+                            "reason": str(decision_error), "fallback": "abort",
+                        })
+                retry = planned_retry or recovery_retry
                 if retry:
-                    delay = min(2 ** number, 8)
-                    self.report["events"].append({"step_id": step.id, "action": "retry", "reason": str(exc), "wait_seconds": delay})
+                    delay = min(2 ** max(number, 0), 8)
+                    self.report["events"].append({
+                        "step_id": step.id,
+                        "action": "planned_retry" if planned_retry else "agent_retry",
+                        "reason": str(exc), "wait_seconds": delay,
+                    })
                     self.save()
                     self.sleeper(delay)
                     if not self.cancel.is_set() or step.phase == "cleanup":

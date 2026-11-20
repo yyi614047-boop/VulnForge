@@ -3,7 +3,7 @@ from app.lab.hashing import digest
 
 
 def test_role_prompts_are_markdown_and_nonempty():
-    for role in ("researcher", "planner"):
+    for role in ("researcher", "planner", "recovery"):
         prompt = load_role_prompt(role)
         assert prompt.startswith("# ")
         assert len(prompt) > 100

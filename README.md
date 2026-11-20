@@ -27,6 +27,7 @@ LangGraph owns the StateGraph, node scheduling, state transitions, and condition
 | Runtime / orchestration | LangGraph |
 | Schemas and validation | Pydantic |
 | Tool execution | Custom `StepExecutor` and Docker/HTTP/file tools |
+| Recovery | Markdown-guided Recovery Agent + deterministic retry gate |
 | Knowledge | Reviewed YAML cards + declared Markdown/Compose sources |
 | Retrieval | Not part of the application |
 
@@ -78,6 +79,7 @@ Use `--knowledge` to point to a directory containing reviewed executable cards. 
 - Docker and HTTP operations are bounded and constrained to the local lab.
 - A separate Verifier evaluates observed evidence; the Planner and Reproducer cannot declare success.
 - Cleanup is part of the Pipeline lifecycle.
+- Recovery currently supports only retrying the exact same policy-approved transient step or aborting. It cannot change tools, targets, commands, plans, or verification criteria.
 
 ## Development
 
