@@ -16,6 +16,12 @@ MODULE_PATTERN = re.compile(r"^(?:exploit|auxiliary)/[A-Za-z0-9_./-]+$")
 MODULE_IN_OUTPUT = re.compile(r"\b(?:exploit|auxiliary)/[A-Za-z0-9_./-]+\b")
 
 
+def valid_module_path(module: str) -> bool:
+    return bool(MODULE_PATTERN.fullmatch(module)) and all(
+        part not in {"", ".", ".."} for part in module.split("/")
+    )
+
+
 @dataclass(frozen=True)
 class ModuleCheck:
     module: str
@@ -54,7 +60,7 @@ class MetasploitRunner:
         output = self._run_console(f"search cve:{cve.upper()}; exit")
         modules = []
         for match in MODULE_IN_OUTPUT.findall(output):
-            if MODULE_PATTERN.fullmatch(match) and match not in modules:
+            if valid_module_path(match) and match not in modules:
                 modules.append(match)
         return modules
 
@@ -86,7 +92,7 @@ class MetasploitRunner:
     def check_module(self, module: str, host: str, port: int) -> ModuleCheck:
         """Run one module's native check; never invoke its exploit method."""
         self._validate_target(host, port)
-        if not MODULE_PATTERN.fullmatch(module):
+        if not valid_module_path(module):
             raise ValueError("Invalid Metasploit module path")
         output = self._run_console(
             f"use {module}; set RHOSTS {host}; set RPORT {port}; check; exit"
@@ -125,4 +131,5 @@ class MetasploitRunner:
         else:
             status = "inconclusive"
         return {"cve": cve.upper(), "target": {"host": host, "port": port},
-                "status": status, "modules": results}
+                "status": status, "verification_type": "native_check_only",
+                "exploit_payload_executed": False, "modules": results}
