@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from pydantic import Field
 
-from app.agent_context import agent_session, invoke_agent
+from app.runtime.context import agent_session, invoke_agent
 
 from app.lab.authoring import ScriptAuthoring, snapshot
 from app.lab.environment_authoring import EnvironmentAuthoring

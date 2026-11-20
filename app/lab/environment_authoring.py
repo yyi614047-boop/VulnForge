@@ -7,7 +7,7 @@ import yaml
 
 from pydantic import Field
 
-from app.agent_context import agent_session, invoke_agent
+from app.runtime.context import agent_session, invoke_agent
 
 from app.lab.authoring import snapshot
 from app.lab.knowledge import KnowledgeBase, StrictModel

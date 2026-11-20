@@ -2,11 +2,11 @@
 from pathlib import Path
 from uuid import uuid4
 
-from app.lab.authoring import snapshot
+from app.execution.artifacts import snapshot
 from app.lab.knowledge import KnowledgeBase
-from app.lab.pipeline import Pipeline
-from app.lab.step_executor import atomic_json
-from app.tools.files import file_hash, local_path
+from app.workflows.reproduction.graph import Pipeline
+from app.execution.executor import atomic_json
+from app.tools.builtin.filesystem import file_hash, local_path
 
 
 def comparable(first, second):

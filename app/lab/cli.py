@@ -6,11 +6,11 @@ from uuid import uuid4
 
 from app.domain.requests import ReproductionRequest
 from app.targets.vulhub import VulhubTargetLoader
-from app.lab.model_provider import configured_model
-from app.lab.pipeline import Pipeline
-from app.lab.planning import StructuredPlanner
-from app.lab.research import Researcher
-from app.tools.docker_engine import DockerEngine
+from app.runtime.models import configured_model
+from app.workflows.reproduction.graph import Pipeline
+from app.agents.planner import StructuredPlanner
+from app.agents.researcher import Researcher
+from app.environments.docker.engine import DockerEngine
 
 
 def _parser():
