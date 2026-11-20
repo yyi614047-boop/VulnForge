@@ -37,12 +37,10 @@ app/
       planner.md
       recovery.md
       verifier.md
-      authoring.md
     researcher.py
     planner.py
     recovery.py
     verifier.py
-    authoring.py
     prompts.py
 
   domain/
@@ -57,7 +55,6 @@ app/
       graph.py        # LangGraph construction and routing
       state.py        # ReproductionState
       nodes.py        # thin orchestration nodes
-    authoring.py
     batch.py
 
   execution/
@@ -175,11 +172,11 @@ The planned Metasploit integration should use a controlled API such as msfrpcd/R
 | `app/lab/planning.py` | `agents/planner.py` (moved); legacy deployment-plan schema still awaits replacement by `domain/plans.py` |
 | `app/lab/step_executor.py` | `execution/executor.py` (moved; old path is compatibility import) |
 | `app/lab/recovery_controller.py` | `agents/recovery.py` (moved; currently retry/abort only) |
-| `app/lab/recovery.py` | inspect and split into authoring/recovery services; do not blindly move |
+| `app/lab/recovery.py` | removed; superseded by bounded `agents/recovery.py` and `execution/recovery.py` |
 | `app/lab/http.py` | `execution/probes.py` (moved) |
 | `app/lab/assets.py` + `app/lab/hashing.py` | `execution/artifacts.py` (moved) |
 | `app/lab/ports.py` | `environments/docker/network.py` (moved) |
-| `app/lab/authoring.py` + `environment_authoring.py` | `agents/authoring.py` plus authoring workflow |
+| `app/lab/authoring.py` + `environment_authoring.py` | removed; autonomous PoC and environment authoring are outside the product scope |
 | `app/lab/batch.py` | `workflows/batch.py` |
 | `app/lab/comparison.py` | `evaluation/comparison.py` |
 | `app/tools/docker_engine.py` + `docker_lab.py` | `environments/docker/` (moved; old paths are compatibility imports) |
