@@ -313,3 +313,6 @@ Before creating a `PoCExecutionSpec`, Docker inspection verifies:
 Private target addresses are rejected unless this attestation is present and the exact network name is approved in policy. The runtime does not infer authorization from RFC1918 addressing. Callback payloads remain separately disabled unless policy explicitly enables them.
 
 Live Docker daemon, Metasploit RPC, exploit execution, and teardown validation remain required; fake-Docker tests prove the authorization checks, not real-world isolation.
+
+
+Run the opt-in real-Docker network integration test with `VULNFORGE_DOCKER_INTEGRATION=1 python -m pytest -q tests/test_docker_isolation_integration.py`. It verifies peer reachability on the internal lab network, blocked external egress, and the one-network-only container attachment invariant. The default unit suite skips this test unless explicitly enabled.
