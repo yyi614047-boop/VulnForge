@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
+from app.domain.requests import ReproductionRequest
+from app.targets.vulhub import VulhubTargetLoader
 from app.lab.model_provider import configured_model
 from app.lab.pipeline import Pipeline
 from app.lab.planning import StructuredPlanner
@@ -14,7 +16,12 @@ from app.tools.docker_engine import DockerEngine
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("identifier", nargs="?", help="Trusted knowledge-card identifier")
-    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect"], default="run")
+    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate"], default="run")
+    parser.add_argument("--targets", type=Path, default=Path("targets/vulhub"),
+                        help="Root of the retained Vulhub target corpus")
+    parser.add_argument("--query", help="Search query for target-search")
+    parser.add_argument("--environment", help="Relative target directory for target-inspect")
+    parser.add_argument("--request-file", type=Path, help="JSON ReproductionRequest for request-validate")
     parser.add_argument("--knowledge", type=Path, default=Path("knowledge/cards"),
                         help="Directory containing reviewed executable YAML knowledge cards")
     parser.add_argument("--workspace", type=Path, default=Path(".labs"))
@@ -38,6 +45,24 @@ def main():
         if path is None:
             parser.error("--action inspect requires a report path")
         print(json.dumps(json.loads(path.read_text(encoding="utf-8")), ensure_ascii=False, indent=2))
+        return
+    if args.action == "target-search":
+        if not args.query:
+            parser.error("--action target-search requires --query")
+        targets = VulhubTargetLoader(args.targets).search(args.query)
+        print(json.dumps([item.model_dump(mode="json") for item in targets], ensure_ascii=False, indent=2))
+        return
+    if args.action == "target-inspect":
+        if not args.environment:
+            parser.error("--action target-inspect requires --environment")
+        target = VulhubTargetLoader(args.targets).load(args.environment)
+        print(json.dumps(target.model_dump(mode="json"), ensure_ascii=False, indent=2))
+        return
+    if args.action == "request-validate":
+        if not args.request_file:
+            parser.error("--action request-validate requires --request-file")
+        request = ReproductionRequest.model_validate(json.loads(args.request_file.read_text(encoding="utf-8")))
+        print(json.dumps(request.model_dump(mode="json"), ensure_ascii=False, indent=2))
         return
     if args.action == "engine":
         result = DockerEngine().registry().call("ensure_docker_engine", {

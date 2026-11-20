@@ -94,4 +94,4 @@ class VulhubTargetLoader:
             environment=EnvironmentSpec(compose_file=compose_path.relative_to(self.root).as_posix(),
                                         services=sorted(map(str, services)), published_ports=ports,
                                         build_required=any(isinstance(v, dict) and "build" in v for v in services.values())),
-            reproduction_entrypoints=sorted(scripts), status="candidate")
+            reproduction_entrypoints=sorted(scripts))

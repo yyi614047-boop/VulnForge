@@ -1,6 +1,6 @@
 # VulnForge Architecture v2 (Draft)
 
- > Status: active target architecture; implementation is in progress. Completed and pending migration slices are tracked below.
+> Status: active target architecture; implementation is in progress. Completed and pending migration slices are tracked below.
 > Runtime: LangGraph. Model integration: LangChain + OpenAI API. Metasploit integration: undecided; see Verification.
 
 ## 1. Product boundary

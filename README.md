@@ -38,7 +38,7 @@ RAG, BM25, embedding indexes, the experimental source-driven runner, and the dup
 
 Current implementation still consumes reviewed YAML cards from `knowledge/cards/`. This is a compatibility boundary for the legacy Pipeline, not the target architecture. The next migration replaces this with `TargetSpec` plus a separately trusted `ExecutionPolicy`.
 
-The upstream Vulhub corpus now lives under `targets/vulhub/` as untrusted target material. `VulhubTargetLoader` converts environments into review-required `TargetSpec` candidates; it never grants execution permission.
+The upstream Vulhub corpus now lives under `targets/vulhub/` as untrusted target material. `VulhubTargetLoader` converts environments into `TargetSpec` candidates; it never grants execution permission. Use `--action target-search` or `--action target-inspect` to explore candidates, and `--action request-validate` to validate a `ReproductionRequest`.
 
 ## Install
 
@@ -63,6 +63,8 @@ On PowerShell use `$env:OPENAI_API_KEY="..."` and `$env:PLANNER_MODEL="gpt-4o"`.
 ## CLI
 
 ```bash
+python -m app.lab.cli --action target-search --query CVE-2021-25646
+python -m app.lab.cli --action target-inspect --environment druid/CVE-2021-25646
 python -m app.lab.cli --action engine --check-only
 python -m app.lab.cli CVE-2021-25646 --action research
 python -m app.lab.cli CVE-2021-25646 --action plan
