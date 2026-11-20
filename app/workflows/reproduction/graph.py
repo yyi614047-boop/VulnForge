@@ -112,6 +112,7 @@ class Pipeline:
         """执行复现阶段中的脚本或 HTTP 请求。"""
         if self.active:
             self.executor.execute_phase("reproduce")
+            self.executor.run_metasploit()
             return {"status": self.executor.report["status"]}
         return {}
 
