@@ -260,7 +260,7 @@ class MetasploitRpcAdapter:
                 or check_outcome.target_fingerprint != target.fingerprint()
                 or check_outcome.candidate_id != candidate.candidate_id
                 or check_outcome.module_metadata_sha256 != candidate.metadata_sha256):
-            raise PermissionError("Exploit execution requires a completed vulnerable Check from this adapter instance")
+            raise PermissionError("Exploit execution requires a completed vulnerable Check from the same adapter instance")
         before_sessions = self.client.call("session.list") or {}
         response = self.client.call("module.execute", "exploit", self._module_name(spec), spec.options)
         job_id, job_uuid = self._ticket(response)
