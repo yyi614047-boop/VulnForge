@@ -51,9 +51,19 @@ def validate_execution_plan(raw, bundle: dict, target: TargetSpec,
             or bundle["assets_hash"] != __import__("hashlib").sha256(
                 json.dumps(bundle["assets"], sort_keys=True).encode("utf-8")).hexdigest()):
         raise ValueError("Research bundle provenance is invalid")
-    expected_candidate_id = (poc_selection or {}).get("selected_candidate_id")
-    if plan.selected_poc_candidate_id != expected_candidate_id:
-        raise ValueError("Plan selected PoC candidate differs from the validated selection proposal")
+    if poc_selection is not None:
+        expected_candidate_id = poc_selection.get("selected_candidate_id")
+        if plan.selected_poc_candidate_id != expected_candidate_id:
+            raise ValueError("Plan selected PoC candidate differs from the validated selection proposal")
+    elif plan.selected_poc_candidate_id is not None:
+        eligible_ids = {
+            item.candidate_id for item in
+            (PoCCandidate.model_validate(value) for value in bundle.get("poc_candidates", []))
+            if item.source == "metasploit" and item.module_type == "exploit" and item.inspected
+            and (target.vulnerability_id or "").upper() in {value.upper() for value in item.cve_ids}
+        }
+        if plan.selected_poc_candidate_id not in eligible_ids:
+            raise ValueError("Plan selected a PoC candidate that is not bound to the approved target CVE")
     expected = lifecycle(bundle, keep)
     actual = [(s.phase, s.action, s.parameters.get("probe_id")) for s in plan.steps]
     if actual != expected:
