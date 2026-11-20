@@ -261,8 +261,8 @@ Do not make Metasploit a mandatory runtime dependency until its adapter and secu
 - Primary vulnerable-environment source: Vulhub; native Vulhub PoCs are optional rather than assumed.
 - PoC authoring/generation: explicitly out of scope.
 - Separation of concerns: Researcher discovers and inspects; Planner selects and plans; deterministic policy authorizes; Executor invokes adapters; Verifier independently evaluates evidence; Recovery coordinates bounded retry/replan/backend-switch/abort.
-- Read-only Metasploit CVE discovery and module metadata inspection are implemented on the feature branch through `app/discovery/metasploit.py` and the `metasploit-search` / `metasploit-inspect` CLI actions. They are not yet part of the LangGraph Planner/Executor path.
-- Metasploit RPC execution and policy-bound checks remain unimplemented. A target-bound, review-only `PoCExecutionSpec` and deterministic compatibility gate have been added; neither authorizes execution.
+- Read-only Metasploit CVE discovery and module metadata inspection are implemented through `app/discovery/metasploit.py` and the `metasploit-search` / `metasploit-inspect` CLI actions.
+- The policy-gated RPC adapter and target-bound `PoCExecutionSpec` are implemented. The optional LangGraph stage now connects Planner selection to Check and conditionally Execute; independent verification still runs through the existing StepExecutor verifier. Live end-to-end validation against a running local Metasploit service and Docker lab remains outstanding.
 
 
 ## Metasploit LangGraph execution stage

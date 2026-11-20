@@ -97,10 +97,8 @@ class Pipeline:
             if self.docker_engine is not None:
                 engine = self.docker_engine.ensure(EngineParams(timeout=self.engine_timeout)).evidence
                 if not engine["ready"]:
-                    message = engine.get("error", engine.get("last_probe_error", "Docker engine unavailable"))
-                    self.executor.report.update(status="environment_error", error=message)
-                    self.executor.save()
-                    return {"status": "environment_error", "engine": engine, "error": message}
+                    return {"status": "environment_error", "engine": engine,
+                            "error": engine.get("error", engine.get("last_probe_error", "Docker engine unavailable"))}
             if engine:
                 self.executor.report["engine"] = engine
                 self.executor.save()
@@ -114,7 +112,7 @@ class Pipeline:
     @state_boundary(reads=['status', 'plan', 'bundle', 'target_spec', 'reproduction_spec'], writes=['status', 'poc_execution', 'error'])
     def metasploit(self, state):
         """在本地实验范围内执行已审批的 Metasploit 候选。"""
-        if state.get("status") != "pending" or not self.active or self.executor.report.get("status") != "pending":
+        if not self.active or self.executor.report.get("status") != "pending":
             return {}
         plan = ExecutionPlan.model_validate(state["plan"])
         if not plan.selected_poc_candidate_id:
@@ -150,7 +148,7 @@ class Pipeline:
     @state_boundary(reads=['status'], writes=['status'])
     def reproduce(self, state):
         """执行复现阶段中的脚本或 HTTP 请求。"""
-        if state.get("status") == "pending" and self.active and self.executor.report.get("status") == "pending":
+        if self.active and self.executor.report.get("status") == "pending":
             self.executor.execute_phase("reproduce")
             return {"status": self.executor.report["status"]}
         return {}

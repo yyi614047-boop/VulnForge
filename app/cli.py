@@ -151,6 +151,8 @@ def main():
         return
     if not args.identifier:
         parser.error("provide a reviewed reproduction-spec identifier")
+    if args.enable_metasploit_execution and args.action != "run":
+        parser.error("--enable-metasploit-execution is only valid with --action run")
     if args.enable_metasploit_execution and not args.discover_metasploit:
         parser.error("--enable-metasploit-execution requires --discover-metasploit")
     if args.action in {"plan", "run"} and not args.policy_file:
