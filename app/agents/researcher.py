@@ -102,6 +102,6 @@ class Researcher:
             "assets_hash": digest(json.dumps(assets, sort_keys=True)),
             "synthesis": synthesis.model_dump(),
             "generation": "model" if self.llm else "source_documents",
-            "card_hash": digest(card.model_dump_json()),
+            "card_hash": card.fingerprint(),
             "compose_hash": digest(json.dumps(config, sort_keys=True)),
         }
