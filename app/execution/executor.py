@@ -440,7 +440,8 @@ class StepExecutor:
                 result = verify(probes, self.observations, self.logs) if probes else {
                     "status": "inconclusive", "checks": [], "reason": "No independent verification assertions were declared"}
             metasploit = self.report.get("metasploit", {})
-            if (self.domain_plan.selected_poc_candidate_id and self.metasploit_adapter is not None\n                    and metasploit.get("status") != "executed"):
+            if (self.domain_plan.selected_poc_candidate_id and self.metasploit_adapter is not None
+                    and metasploit.get("status") != "executed"):
                 if metasploit.get("status") in {"check_safe", "check_not_vulnerable"}:
                     result["status"] = "not_reproduced"
                 else:
