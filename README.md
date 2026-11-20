@@ -54,7 +54,7 @@ python -m app.cli --action metasploit-inspect --cve CVE-2021-44228 --module expl
 
 The search action returns candidate module paths. Inspection returns a typed `PoCCandidate` with module identity, parsed metadata, references, targets, options where the console output exposes them, and a SHA-256 digest of the raw metadata excerpt. The integration uses `msfconsole` with argument arrays and `shell=False`. It does not invoke `check`, `exploit`, payloads, or sessions. Metadata parsing is best-effort; the raw excerpt is retained so fields that cannot be parsed are not silently fabricated.
 
-To opt in to candidate discovery during Researcher/Planner runs, add `--discover-metasploit` to `research`, `plan`, or `run`. The Planner may nominate one inspected exploit module for human review. Candidate metadata is fingerprinted into the ExecutionPlan, but the selected candidate is not an executable step and does not grant authorization.
+To opt in to candidate discovery during Researcher/Planner runs, add `--discover-metasploit` to `research`, `plan`, or `run`. The Planner may nominate one inspected exploit module for human review. Candidate metadata is fingerprinted into the ExecutionPlan. For the `run` action only, `--execute-metasploit` enables the policy-gated RPC check/execute path; see `docs/metasploit-integration.md` for required local RPC configuration and approvals.
 
 ## Transitional target inputs
 
