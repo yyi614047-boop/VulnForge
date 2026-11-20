@@ -150,3 +150,17 @@ def test_execution_spec_rejects_non_exploit_module_path():
             target_host="127.0.0.1",
             target_port=8080,
         )
+
+
+def test_execution_spec_rejects_module_path_traversal():
+    with pytest.raises(Exception):
+        PoCExecutionSpec(
+            candidate_id="msf:module",
+            module_path="exploit/linux/../multi/example",
+            module_metadata_sha256="b" * 64,
+            target_id="demo:CVE-2020-1234",
+            target_fingerprint="a" * 64,
+            cve_id="CVE-2020-1234",
+            target_host="127.0.0.1",
+            target_port=8080,
+        )
