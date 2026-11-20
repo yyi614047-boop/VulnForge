@@ -7,7 +7,7 @@ from pydantic import Field, model_validator
 from app.agent_context import agent_session, invoke_agent
 
 from app.lab.knowledge import Card, StrictModel
-from app.rag.index import digest
+from app.lab.hashing import digest
 
 Action = Literal["stage_artifacts", "pull", "build", "up", "status", "version", "initialize", "health", "script", "http", "verify_http", "read_file", "logs", "verify", "down", "keep"]
 Phase = Literal["deploy", "reproduce", "verify", "cleanup"]
@@ -80,7 +80,7 @@ def validate_deployment_plan(raw, bundle: dict, *, retries=1, timeout=60, keep=F
     expected = lifecycle(bundle, keep)
     if [(s.phase, s.action, s.probe_id) for s in plan.steps] != expected:
         raise ValueError("Plan must preserve the trusted lifecycle and reproduction order")
-    citations = {h["id"] for h in bundle["retrieval"]["hits"]}
+    citations = {h["id"] for h in bundle["evidence"]["hits"]}
     probes = {p.id: p for p in card.reproduction}
     for step in plan.steps:
         if not set(step.citations) <= citations:
