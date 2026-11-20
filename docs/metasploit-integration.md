@@ -151,3 +151,29 @@ The active policy must also approve the target fingerprint, loopback host, and p
 ### Current limitations
 
 This adapter is not yet wired into LangGraph's Executor or CLI. Its RPC and policy behavior is unit-tested with a fake client; no live Metasploit daemon/module has been exercised by CI. Automatic candidate fallback and end-to-end verifier/report integration are the next milestones.
+
+
+## LangGraph execution integration (fifth milestone)
+
+The `run` CLI path can now opt into the RPC adapter after the target lab has been deployed and the existing reproduction phase has run:
+
+```bash
+python -m app.cli <reviewed-target-id> \
+  --action run \
+  --policy-file policies/reviewed-local.json \
+  --discover-metasploit \
+  --execute-metasploit
+```
+
+If the lab exposes more than one published port, pass `--metasploit-target-port PORT`. Additional module-specific options can be supplied with repeated `--metasploit-option KEY=VALUE`; the option names must exist in the inspected candidate metadata. The destination host is fixed to `127.0.0.1` in V1.
+
+The Pipeline passes the RPC adapter to `StepExecutor`. After deployment, it:
+1. resolves the Planner-selected candidate from the Researcher bundle;
+2. builds a target- and metadata-bound `PoCExecutionSpec`;
+3. performs `module.check`;
+4. executes only when Check returns exactly `vulnerable` and the policy allows execution;
+5. records the execution outcome and attempts scoped cleanup of sessions created by that module.
+
+If no candidate was selected, the adapter is absent, the port is ambiguous, policy denies the action, Check is unsupported/safe/unknown, or RPC fails, the report records that state. When a candidate was selected but an approved exploit did not complete, the final reproduction result cannot be marked successful merely because other checks passed. The independent Verifier remains required after an execution completes.
+
+The run path is opt-in and requires both `--discover-metasploit` and `--execute-metasploit`. RPC credentials are read from environment variables; do not put them in command-line arguments or policy files.
