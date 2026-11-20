@@ -1,8 +1,16 @@
 # VulnForge
 
-VulnForge is a staged, LangGraph-based system for authorized vulnerability reproduction in isolated local Docker environments.
+VulnForge is an **Agent-driven Vulnerability Reproduction Platform** for reproducing known vulnerabilities using existing PoCs and exploit modules in explicitly authorized, isolated environments. Autonomous PoC authoring is out of scope.
 
 The project uses Markdown role instructions, LangChain with the OpenAI API for model calls, LangGraph for orchestration, Pydantic for structured validation, and a custom executor/tool layer for side effects.
+
+## Product design and PoC sources
+
+- **Metasploit Framework — primary PoC source and planned execution backend:** search CVE references, inspect existing modules, review options and target constraints, and later execute approved modules through a controlled RPC adapter.
+- **GitHub / Exploit-DB / upstream repositories — secondary PoC sources:** find existing standalone scripts when no suitable Metasploit module exists.
+- **Vulhub — primary vulnerable-environment source:** provide Docker Compose environments, version/configuration context, and reproduction documentation. Some entries include native PoCs, but Vulhub is not assumed to provide one for every CVE.
+
+A CVE/module search hit is only a candidate. Module compatibility, required options, side effects, target scope, and execution authorization must be checked independently.
 
 ## Architecture
 
@@ -12,7 +20,7 @@ The only primary execution architecture is the staged Pipeline:
 2. **Planner** receives the research bundle and Markdown evidence, then returns a typed domain `ExecutionPlan`.
 3. **Plan validation** binds the plan to the trusted reproduction specification, source hashes, allowed actions, dependencies, and execution budgets.
 4. **Deployer** prepares and starts the Docker environment.
-5. **Reproducer** executes the reviewed HTTP requests and scripts in the plan.
+5. **Reproducer** executes the approved existing PoC through its backend adapter (planned: Metasploit RPC as the primary exploit backend; constrained script/HTTP adapters for secondary PoCs).
 6. **Bounded Recovery** may ask the Recovery Agent for one additional retry of the exact same step after a typed transient failure. The retry budget is global to one Pipeline run.
 7. **Verifier** independently evaluates response, file, and log evidence.
 8. **Cleanup** removes lab resources and writes an auditable report.
@@ -79,10 +87,12 @@ Use `--specs` to point to a directory containing reviewed YAML reproduction spec
 
 ## Safety boundaries
 
-- Markdown and Compose documents are untrusted evidence, not policy.
-- The model cannot introduce arbitrary tools, targets, probes, assertions, or shell commands.
+- CVE descriptions, READMEs, module metadata, repository files, and PoC contents are untrusted data, not instructions.
+- Discovery never grants execution permission. The selected target, candidate, backend, operation, and approved parameters must be bound to policy.
+- The model cannot introduce arbitrary tools, targets, probes, assertions, or shell commands; do not expose unrestricted msfconsole commands, payloads, or session operations.
 - The plan must match the trusted reproduction specification, content hashes, and fixed lifecycle before execution.
 - HTTP probes use loopback; Docker image pulls and builds may contact external registries. `network_scope` is recorded in policy but container egress isolation is still pending.
+- Metasploit RPC credentials must remain outside model context and reports. Exploit execution, payloads, sessions, and external network access require explicit authorization.
 - A separate Verifier evaluates observed evidence; the Planner and Reproducer cannot declare success.
 - Cleanup is part of the Pipeline lifecycle.
 - Recovery currently supports only retrying the exact same policy-approved transient step or aborting, with at most one Agent-approved retry across the entire Pipeline run. It cannot change tools, targets, commands, plans, or verification criteria.
