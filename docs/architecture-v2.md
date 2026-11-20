@@ -1,6 +1,6 @@
 # VulnForge Architecture v2 (Draft)
 
-> Status: architecture proposal. This document does not authorize deleting or migrating implementation files by itself.
+ > Status: active target architecture; implementation is in progress. Completed and pending migration slices are tracked below.
 > Runtime: LangGraph. Model integration: LangChain + OpenAI API. Metasploit integration: undecided; see Verification.
 
 ## 1. Product boundary
@@ -13,7 +13,7 @@ The system supports both:
 - Dynamic research from a CVE identifier, repository URL, or vulnerability description.
 - A user-supplied target specification for reproducible, controlled runs.
 
-The original Vulhub repository is retained as target material, not treated as a KnowledgeBase or RAG corpus.
+The upstream Vulhub repository is retained under `targets/vulhub/` as target material, not treated as a KnowledgeBase or RAG corpus.
 
 ## 2. Architecture principles
 
@@ -189,7 +189,7 @@ Until that decision is made, keep the verifier interface provider-neutral and do
 
 Remove obsolete RAG/BM25/embedding code, duplicate workflow implementations, and documentary-card evaluation code only after confirming no live imports or CLI references remain.
 
-Retain `knowledge/vulhub/` contents and upstream license; migrate to `targets/vulhub/` without rewriting upstream files unnecessarily.
+Completed: preserve the upstream Vulhub tree and license under `targets/vulhub/` without rewriting upstream files.
 
 Do not delete target assets, scripts, Compose files, or configuration merely because they currently live under a directory named `knowledge`.
 
@@ -204,3 +204,23 @@ Do not delete target assets, scripts, Compose files, or configuration merely bec
 7. Run unit, integration, and security suites; update docs; only then consider merging to main.
 
 No mass deletion or main-branch merge should happen before the relevant migration slice passes its tests.
+
+
+## 11. Implementation ledger
+
+### Completed
+
+- Removed the obsolete RAG/source-driven and documentary-card paths.
+- Removed the duplicate sequential execution engine; LangGraph is the only runtime.
+- Added pure domain contracts for requests, targets, policies, plans, evidence, and reports.
+- Added a Vulhub target adapter that emits untrusted candidates and preserves source provenance.
+- Moved the upstream Vulhub corpus, including its license, to `targets/vulhub/`.
+- Added unit tests for domain invariants and target-loader path safety, plus a GitHub Actions unit-test workflow.
+
+### Pending before calling the migration complete
+
+- Wire the new request/target/policy/plan/report contracts through the actual CLI, LangGraph workflow, and executor.
+- Replace the legacy YAML Card/KnowledgeBase dependency; remove `app/lab/knowledge.py` only after all call sites are migrated.
+- Move workflow, agent, execution, tool, and Docker environment implementations into the target package layout without duplicate implementations.
+- Add independent verifier interface and security tests; keep Metasploit optional pending a separate design decision.
+- Run the CI suite and Docker-backed integration path, inspect the reports, and resolve all failures.

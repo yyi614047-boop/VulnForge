@@ -20,8 +20,9 @@ class ReadParams(BaseModel):
 
 
 def vulhub_root(root: Path) -> Path:
-    nested = root / "vulhub"
-    return nested.resolve() if nested.is_dir() else root.resolve()
+    root = Path(root).resolve()
+    candidates = [root / "targets" / "vulhub", root / "vulhub", root / "knowledge" / "vulhub", root.parent / "targets" / "vulhub"]
+    return next((path.resolve() for path in candidates if path.is_dir()), root)
 
 
 class VulhubSources:

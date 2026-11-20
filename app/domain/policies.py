@@ -1,0 +1,63 @@
+"""Deterministic authorization contracts. A target description never grants permissions."""
+from typing import Literal
+from pydantic import Field, model_validator
+from app.domain.plans import ExecutionAction
+from app.domain.targets import DomainModel, TargetSpec
+
+
+class ExecutionPolicy(DomainModel):
+    policy_id: str = Field(min_length=1, max_length=128)
+    approved_target_hashes: dict[str, str] = Field(min_length=1, max_length=500)
+    allowed_actions: set[ExecutionAction] = Field(min_length=1, max_length=32)
+    allowed_services: set[str] = Field(min_length=1, max_length=100)
+    allowed_ports: set[int] = Field(default_factory=set, max_length=100)
+    network_scope: Literal["loopback_only", "explicit_allowlist", "disabled"] = "loopback_only"
+    allowed_hosts: set[str] = Field(default_factory=lambda: {"127.0.0.1", "localhost"}, max_length=100)
+    max_timeout_seconds: int = Field(default=60, ge=1, le=300)
+    max_retries_per_step: int = Field(default=1, ge=0, le=3)
+    max_recovery_actions: int = Field(default=1, ge=0, le=5)
+    allow_image_build: bool = False
+    allow_target_scripts: bool = False
+    allow_keep_environment: bool = False
+
+    @model_validator(mode="after")
+    def validate_policy(self):
+        if any(len(value) != 64 or any(c not in "0123456789abcdef" for c in value) for value in self.approved_target_hashes.values()):
+            raise ValueError("Approved target bindings must be SHA-256 fingerprints")
+        if any(port < 1 or port > 65535 for port in self.allowed_ports):
+            raise ValueError("Allowed ports must be valid port numbers")
+        if self.network_scope == "loopback_only" and not self.allowed_hosts <= {"127.0.0.1", "localhost", "::1"}:
+            raise ValueError("Loopback-only policy cannot allow non-loopback hosts")
+        if self.network_scope == "disabled" and self.allowed_hosts:
+            raise ValueError("Disabled network policy cannot contain allowed hosts")
+        return self
+
+    def authorize_target(self, target: TargetSpec) -> None:
+        expected = self.approved_target_hashes.get(target.target_id)
+        if expected is None:
+            raise PermissionError(f"Target {target.target_id!r} is not approved by policy {self.policy_id}")
+        if expected != target.fingerprint():
+            raise PermissionError("Target content differs from the policy-approved fingerprint")
+        if not set(target.environment.services) <= self.allowed_services:
+            raise PermissionError("Target declares a service outside the execution policy")
+        ports = {port for values in target.environment.published_ports.values() for port in values}
+        if not ports <= self.allowed_ports:
+            raise PermissionError("Target declares a published port outside the execution policy")
+        if target.environment.build_required and not self.allow_image_build:
+            raise PermissionError("Target requires an image build disabled by policy")
+        if target.reproduction_entrypoints and not self.allow_target_scripts:
+            raise PermissionError("Target scripts are disabled by execution policy")
+
+    def authorize_action(self, action: str, *, timeout_seconds: int, retries: int = 0) -> None:
+        if action not in self.allowed_actions:
+            raise PermissionError(f"Action {action!r} is not allowed")
+        if not 1 <= timeout_seconds <= self.max_timeout_seconds:
+            raise PermissionError("Action timeout exceeds execution policy")
+        if not 0 <= retries <= self.max_retries_per_step:
+            raise PermissionError("Action retry count exceeds execution policy")
+        if action == "build" and not self.allow_image_build:
+            raise PermissionError("Image builds are disabled by execution policy")
+        if action == "script" and not self.allow_target_scripts:
+            raise PermissionError("Target scripts are disabled by execution policy")
+        if action == "keep" and not self.allow_keep_environment:
+            raise PermissionError("Keeping the environment is disabled by execution policy")

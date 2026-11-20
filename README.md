@@ -38,7 +38,7 @@ RAG, BM25, embedding indexes, the experimental source-driven runner, and the dup
 
 Current implementation still consumes reviewed YAML cards from `knowledge/cards/`. This is a compatibility boundary for the legacy Pipeline, not the target architecture. The next migration replaces this with `TargetSpec` plus a separately trusted `ExecutionPolicy`.
 
-The upstream Vulhub corpus under `knowledge/vulhub/` is retained as target material and will move to `targets/vulhub/`. It is not an execution-permission source.
+The upstream Vulhub corpus now lives under `targets/vulhub/` as untrusted target material. `VulhubTargetLoader` converts environments into review-required `TargetSpec` candidates; it never grants execution permission.
 
 ## Install
 

@@ -1,11 +1,14 @@
-# Architecture status
+# VulnForge architecture
 
-The proposed target architecture is documented in [architecture-v2.md](architecture-v2.md). It is the design source of truth for the ongoing refactor.
+The target architecture and migration sequence are maintained in [architecture-v2.md](architecture-v2.md).
 
-## Transitional implementation
+## Current migration status
 
-The current branch still runs the legacy LangGraph Pipeline under `app/lab/`. It temporarily consumes reviewed YAML cards through `app/lab/knowledge.py`; this is a migration dependency, not a commitment to retain the KnowledgeBase design.
+- LangGraph is the only workflow engine.
+- LangChain + OpenAI remains the model integration.
+- RAG, BM25, embedding indexes, the duplicate sequential runner, and documentary evaluation cards have been removed.
+- Pure domain contracts now exist under `app/domain/`: `ReproductionRequest`, `TargetSpec`, `ExecutionPolicy`, `ExecutionPlan`, and execution/evidence result models.
+- The upstream Vulhub corpus is preserved under `targets/vulhub/`; candidate loading does not grant execution permission.
+- The legacy Pipeline still depends on `app/lab/knowledge.py` and is not yet fully wired to the new domain contracts. That compatibility path must be removed only after the executor and workflows enforce `ExecutionPolicy`.
 
-The next migration replaces that input contract with `ReproductionRequest`, `TargetSpec`, and a separately trusted `ExecutionPolicy`. Until that slice is implemented and tested, do not delete the remaining legacy card loader or its required assets.
-
-RAG, BM25, embeddings, the duplicate sequential workflow path, and the documentary-card evaluation utilities are not part of the target system.
+Do not describe the runtime migration as complete until the new request, target, policy, plan, and report contracts are used by the actual CLI-to-executor path and the integration tests pass.

@@ -1,7 +1,5 @@
-# Retained upstream target material
+# Knowledge compatibility directory
 
-This directory is transitional. The upstream Vulhub corpus is retained as target material and will move to `targets/vulhub/` during the architecture migration. It is not a RAG index or a runtime KnowledgeBase.
+This directory currently contains only the compatibility location for reviewed execution-policy inputs. The upstream Vulhub corpus has moved to [targets/vulhub/](../targets/vulhub/README.md).
 
-- [Upstream Vulhub documentation](vulhub/README.md)
-- [Environment catalog](vulhub/environments.toml)
-- [Shared base images](vulhub/base/)
+The legacy YAML card loader is transitional and is not the target domain model. New target descriptions use `TargetSpec`; execution permissions must be supplied separately through `ExecutionPolicy`.
