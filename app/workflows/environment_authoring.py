@@ -9,11 +9,11 @@ from pydantic import Field
 
 from app.runtime.context import agent_session, invoke_agent
 
-from app.lab.authoring import snapshot
+from app.execution.artifacts import snapshot
 from app.targets.vulhub.legacy_cards import KnowledgeBase, StrictModel
-from app.lab.step_executor import atomic_json
-from app.tools.docker_lab import environment_assets, load_compose
-from app.tools.files import WorkspaceFiles, WriteParams, file_hash, local_path
+from app.execution.executor import atomic_json
+from app.environments.docker.manager import environment_assets, load_compose
+from app.tools.builtin.filesystem import WorkspaceFiles, WriteParams, file_hash, local_path
 
 
 class EnvironmentFile(StrictModel):

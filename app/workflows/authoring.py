@@ -10,10 +10,11 @@ from pydantic import Field
 from app.runtime.context import agent_session, invoke_agent
 
 from app.targets.vulhub.legacy_cards import KnowledgeBase, StrictModel
-from app.lab.pipeline import Pipeline
-from app.lab.step_executor import atomic_json
-from app.tools.docker_lab import environment_assets, load_compose
-from app.tools.files import WorkspaceFiles, WriteParams, file_hash, local_path
+from app.workflows.reproduction.graph import Pipeline
+from app.execution.executor import atomic_json
+from app.environments.docker.manager import environment_assets, load_compose
+from app.tools.builtin.filesystem import WorkspaceFiles, WriteParams, file_hash, local_path
+from app.execution.artifacts import snapshot
 
 
 class ScriptCandidate(StrictModel):
@@ -24,29 +25,6 @@ class ScriptCandidate(StrictModel):
 class ScriptRevision(StrictModel):
     explanation: str = Field(min_length=1, max_length=4000)
     scripts: list[ScriptCandidate] = Field(min_length=1, max_length=10)
-
-
-def snapshot(source: Path, destination: Path):
-    """Copy bounded regular inputs; never follow linked paths or copy into source."""
-    source, destination = source.resolve(), destination.resolve()
-    if destination.is_relative_to(source):
-        raise ValueError("Authoring workspace must be outside the knowledge directory")
-    files, total = [], 0
-    for path in sorted(source.rglob("*")):
-        checked = local_path(source, path.relative_to(source).as_posix())
-        if checked.is_file():
-            total += checked.stat().st_size
-            files.append(checked)
-            if total > 32 * 1024 * 1024 or len(files) > 1000:
-                raise ValueError("Knowledge snapshot exceeds 32 MiB / 1000 files")
-    destination.mkdir(parents=True, exist_ok=False)
-    for path in files:
-        expected = file_hash(path)
-        target = destination / path.relative_to(source)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(path, target)
-        if file_hash(target) != expected:
-            raise ValueError("Knowledge changed during snapshot")
 
 
 class ScriptAuthoring:

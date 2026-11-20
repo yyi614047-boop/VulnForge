@@ -11,8 +11,8 @@ from app.runtime.context import agent_session, invoke_agent
 from app.workflows.authoring import ScriptAuthoring, snapshot
 from app.workflows.environment_authoring import EnvironmentAuthoring
 from app.targets.vulhub.legacy_cards import StrictModel
-from app.lab.pipeline import Pipeline
-from app.lab.step_executor import atomic_json
+from app.workflows.reproduction.graph import Pipeline
+from app.execution.executor import atomic_json
 
 
 class RecoveryDecision(StrictModel):
