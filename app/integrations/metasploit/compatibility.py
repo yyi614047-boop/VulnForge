@@ -38,12 +38,15 @@ def assess_compatibility(
 ) -> CompatibilityAssessment:
     """Compare only explicit signals; missing metadata stays unknown, not a false mismatch."""
     target_cve = _normal_cve(target.vulnerability_id or (reproduction.id if reproduction else ""))
-    reference_cves = {
-        _normal_cve(str(ref.get("ref", "")))
-        for ref in metadata.references
-        if str(ref.get("type", "")).upper() == "CVE" or _normal_cve(str(ref.get("ref", "")))
-    }
-    reference_cves.discard(None)
+    reference_cves = set()
+    for ref in metadata.references:
+        reference = str(ref.get("ref", "")).strip()
+        reference_type = str(ref.get("type", "")).upper()
+        normalized = _normal_cve(reference)
+        if normalized is None and reference_type == "CVE" and re.fullmatch(r"\d{4}-\d{4,}", reference):
+            normalized = f"CVE-{reference}"
+        if normalized:
+            reference_cves.add(normalized)
     matched, unknown, mismatches = [], [], []
 
     if target_cve and target_cve in reference_cves:
