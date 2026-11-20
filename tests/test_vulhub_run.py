@@ -113,3 +113,64 @@ def test_no_documented_http_target_is_inconclusive(tmp_path):
     result = workflow.check("CVE-2020-1234", bundle, [])
     assert result["status"] == "inconclusive"
     assert not metasploit.calls
+
+
+
+def test_planner_receives_only_one_markdown_in_builder_role(tmp_path, monkeypatch):
+    import app.lab.vulhub_run as module
+
+    operation = make_operation()
+    markdown = {
+        "environment": "demo/CVE-2020-1234",
+        "files": [
+            {"source": "demo/CVE-2020-1234/docker-compose.yml",
+             "text": "services:\\n  web:\\n    ports: ['8080:80']"},
+            {"source": "demo/CVE-2020-1234/README.md",
+             "text": "# Reproduction\\nSend this documented request."},
+        ],
+        "assets": [],
+    }
+    class FakeResearcher:
+        def __init__(self, _root):
+            pass
+
+        def research(self, _identifier):
+            return markdown
+
+    captured = {}
+    def fake_invoke(agent, model, schema, prompt):
+        captured.update(agent=agent, prompt=prompt)
+        return SourcePlan(rationale="Follow the documented request", operations=[operation])
+
+    monkeypatch.setattr(module, "VulhubResearcher", FakeResearcher)
+    monkeypatch.setattr(module, "invoke_structured", fake_invoke)
+    workflow = make_workflow(tmp_path)
+    bundle = workflow.plan("CVE-2020-1234")
+
+    assert captured["agent"] == "vulhub_reproduction_builder"
+    assert "Vulnerability Reproduction Builder" in captured["prompt"]
+    assert "Send this documented request." in captured["prompt"]
+    assert "services:" not in captured["prompt"]
+    assert "docker-compose.yml" not in captured["prompt"]
+    assert bundle["compose"]["services"]["web"]["ports"] == ["8080:80"]
+
+
+def test_planner_rejects_ambiguous_multiple_markdown_files(tmp_path, monkeypatch):
+    import app.lab.vulhub_run as module
+
+    class FakeResearcher:
+        def __init__(self, _root):
+            pass
+
+        def research(self, _identifier):
+            return {"files": [
+                {"source": "demo/CVE-2020-1234/README.md", "text": "# Main"},
+                {"source": "demo/CVE-2020-1234/notes.md", "text": "# Notes"},
+                {"source": "demo/CVE-2020-1234/docker-compose.yml", "text": "services: {}"},
+            ]}
+
+    monkeypatch.setattr(module, "VulhubResearcher", FakeResearcher)
+    workflow = make_workflow(tmp_path)
+    import pytest
+    with pytest.raises(ValueError, match="multiple README"):
+        workflow.plan("CVE-2020-1234")
