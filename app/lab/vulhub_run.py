@@ -399,7 +399,7 @@ class VulhubRun:
             report["status"] = "reproducing"
             report["execution_status"] = self.execute_plan(bundle, report, report_path)
             report["status"] = "checking"
-            emit("check.start", agent_status=report["agent_status"])
+            emit("check.start", execution_status=report["execution_status"])
             atomic_json(report_path, report)
             try:
                 report["logs"] = self.command(["logs", "--no-color", "--tail", "100"])
