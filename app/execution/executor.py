@@ -54,7 +54,8 @@ class StepFailure(Exception):
 class StepExecutor:
     def __init__(self, knowledge: Path, workspace: Path, project: str, report_path: Path,
                  *, lab_factory=DockerLab.prepare, requester=request, sleeper=None, cancel=None,
-                 recovery_controller=None, recovery_budget=0, metasploit_adapter=None,\n                 metasploit_target_port=None, metasploit_options=None):
+                 recovery_controller=None, recovery_budget=0, metasploit_adapter=None,
+                 metasploit_target_port=None, metasploit_options=None):
         """初始化组件及其运行所需的配置、依赖和状态。"""
         # Validate the project before using it in filesystem paths.
         DockerLab(workspace / project / "compose.json", project)
