@@ -303,7 +303,7 @@ class DockerLab:
         return {**evidence, "service": service, "path": path}
 
 
-    def resolve_target_endpoint(self, service: str, published_port: int, *, network_name: str, timeout: int = 15) -> dict:
+    def resolve_target_endpoint(self, service: str, published_port: int, *, network_name: str, metasploit_container: str, timeout: int = 15) -> dict:
         """Resolve one running Compose service to its private container IP/port.
 
         The published port must be explicitly bound to loopback in the reviewed
@@ -357,6 +357,18 @@ class DockerLab:
             if ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local:
                 raise ValueError("Selected target network must provide a private, non-loopback IPv4 address")
             address = str(ip)
+            msf_inspected = self._invoke(["docker", "inspect", metasploit_container], timeout)
+            if msf_inspected.returncode:
+                raise ValueError("Cannot inspect the configured Metasploit container")
+            msf_rows = json.loads(msf_inspected.stdout)
+            if not isinstance(msf_rows, list) or len(msf_rows) != 1:
+                raise ValueError("Unexpected Metasploit container inspect response")
+            msf_row = msf_rows[0]
+            if msf_row.get("State", {}).get("Running") is not True:
+                raise ValueError("Configured Metasploit container is not running")
+            msf_network = (msf_row.get("NetworkSettings", {}).get("Networks") or {}).get(network_name)
+            if not isinstance(msf_network, dict) or not msf_network.get("IPAddress"):
+                raise ValueError("Metasploit container is not attached to the selected target network")
             return {
                 "project": self.project,
                 "service": service,
@@ -365,7 +377,8 @@ class DockerLab:
                 "port": matches[0],
                 "published_host_port": published_port,
                 "network": network_name,
-                "networks": [name for name, _ in endpoints],
+                "metasploit_container": metasploit_container,
+                "metasploit_network_ip": msf_network["IPAddress"],
             }
         except (KeyError, TypeError, ValueError, ipaddress.AddressValueError) as exc:
             raise ValueError(f"Cannot safely resolve target endpoint: {exc}") from exc
