@@ -7,8 +7,7 @@ from app.agent_context import isolated_run, state_boundary
 
 from app.lab.planning import StructuredPlanner
 from app.lab.step_executor import StepExecutor, atomic_json
-from app.rag.index import RetrievalIndex
-from app.rag.researcher import Researcher
+from app.lab.research import Researcher
 from app.tools.docker_engine import EngineParams
 
 
@@ -23,14 +22,13 @@ class PipelineState(TypedDict, total=False):
 
 
 class Pipeline:
-    def __init__(self, knowledge: Path, workspace: Path, project: str, *, index_path=None,
-                 embedder=None, llm=None, retries=1, timeout=60, keep=False, executor_options=None,
+    def __init__(self, knowledge: Path, workspace: Path, project: str, *, llm=None, retries=1, timeout=60, keep=False, executor_options=None,
                  docker_engine=None, engine_timeout=120, auto_port=False, documented=None):
         """初始化组件及其运行所需的配置、依赖和状态。"""
         self._run_lock = Lock()
         self.documented = documented
         self.knowledge, self.workspace, self.project = knowledge, workspace, project
-        self.researcher = Researcher(RetrievalIndex(knowledge, index_path or workspace / "rag.sqlite", embedder), llm)
+        self.researcher = Researcher(knowledge, llm)
         self.planner = StructuredPlanner(llm)
         self.retries, self.timeout, self.keep = retries, timeout, keep
         self.executor_options = executor_options or {}
@@ -168,8 +166,7 @@ class Pipeline:
             try:
                 self.knowledge, self.port_selection = prepare_port(self.knowledge, self.workspace, identifier)
                 if self.port_selection["changed"]:
-                    self.researcher.index = RetrievalIndex(self.knowledge, self.knowledge / ".rag.sqlite",
-                                                           self.researcher.index.embedder)
+                    
             except (ValueError, OSError) as exc:
                 report = {"id": identifier, "status": "information_missing", "cleanup": "not_needed", "error": str(exc)}
                 atomic_json(report_path, report)
