@@ -88,6 +88,32 @@ class MetasploitRPCClient:
         if not re.fullmatch(r"[A-Za-z0-9_./-]{1,512}", module_name) or ".." in module_name.split("/"):
             raise ValueError("Invalid module name")
 
+
+    def module_check(self, module_type: str, module_name: str, options: dict):
+        """Run only the module's non-exploit check method."""
+        self._validate_module(module_type, module_name)
+        if module_type not in {"exploit", "auxiliary"}:
+            raise ValueError("Module check supports exploit and auxiliary modules only")
+        if not isinstance(options, dict) or any(
+            not isinstance(key, str) or not key or isinstance(value, (dict, list, tuple, set))
+            for key, value in options.items()
+        ):
+            raise ValueError("Module options must be a flat scalar mapping")
+        result = self._call("module.check", module_type, module_name, options)
+        if not isinstance(result, dict) or not result.get("uuid"):
+            raise MetasploitRPCError("Unexpected module.check response")
+        return result
+
+    def module_results(self, uuid: str):
+        """Fetch the result of a previously submitted check job."""
+        import re
+        if not isinstance(uuid, str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", uuid):
+            raise ValueError("Invalid Metasploit job UUID")
+        result = self._call("module.results", uuid)
+        if not isinstance(result, dict):
+            raise MetasploitRPCError("Unexpected module.results response")
+        return result
+
     def close(self):
         self.token = None
         if self.session is not None and hasattr(self.session, "close"):
