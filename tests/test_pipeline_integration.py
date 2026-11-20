@@ -90,7 +90,7 @@ def test_pipeline_executes_domain_plan_with_policy_and_independent_verifier(tmp_
 
     report = pipeline.run(spec.id, report_path)
 
-    assert report["status"] == "success"
+    assert report["status"] == "success", report
     assert report["cleanup"] == "completed"
     assert report["authorization"]["policy_id"] == policy.policy_id
     assert report["verification"]["status"] == "success"
