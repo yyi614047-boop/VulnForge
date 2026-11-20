@@ -43,6 +43,9 @@ class PoCExecutionSpec(DomainModel):
 
     @model_validator(mode="after")
     def validate_options(self):
+        parts = self.module_path.split("/")
+        if any(part in {"", ".", ".."} for part in parts):
+            raise ValueError("Metasploit module path cannot contain empty or traversal segments")
         if any(not key or len(key) > 128 or not key.replace("_", "").isalnum() for key in self.options):
             raise ValueError("Metasploit option names must be simple identifiers")
         if any(len(value) > 4000 for value in self.options.values()):
