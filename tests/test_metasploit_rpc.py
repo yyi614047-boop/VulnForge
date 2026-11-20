@@ -6,6 +6,7 @@ from app.execution.metasploit_rpc import (
     MetasploitRpcAdapter,
     MetasploitRpcClient,
     MessagePackHttpTransport,
+    MetasploitRpcError,
 )
 
 
@@ -220,3 +221,15 @@ def test_execute_stops_only_new_sessions_matching_this_target_and_module():
     result = adapter.execute(spec, candidate, target, policy, check, timeout=2)
     assert result.cleaned_session_ids == [9]
     assert client.calls[-1] == ("session.stop", (9,))
+
+
+def test_check_unsupported_is_reported_as_a_candidate_result():
+    target, candidate, spec, policy = fixture()
+    client = FakeClient([])
+    def call(method, *params):
+        assert method == "module.check"
+        raise MetasploitRpcError("The target module does not implement a check method")
+    client.call = call
+    outcome = MetasploitRpcAdapter(client).check(spec, candidate, target, policy)
+    assert outcome.status == "failed"
+    assert outcome.result_code == "unsupported"
