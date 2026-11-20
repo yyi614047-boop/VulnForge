@@ -7,7 +7,7 @@ def test_loader_builds_untrusted_target_candidate(tmp_path):
     env.mkdir(parents=True)
     (env / "README.md").write_text("\n".join(["# Demo vulnerability", "CVE-2024-12345 affects demo.", ""]), encoding="utf-8")
     (env / "docker-compose.yml").write_text("\n".join([
-        "services:", "  web:", "    image: nginx:1.25", "    ports:", "      - '127.0.0.1:8080:80'", ""]), encoding="utf-8")
+        "services:", "  web:", "    image: nginx:1.25", "    ports:", "      - \\"127.0.0.1:8080:80\\"", ""]), encoding="utf-8")
     (env / "poc.py").write_text("print('candidate only')\n", encoding="utf-8")
 
     loader = VulhubTargetLoader(tmp_path)
