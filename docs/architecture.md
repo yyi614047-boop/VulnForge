@@ -1,113 +1,80 @@
-# RAG、Planner、Executor 的当前架构
+# VulnForge architecture
 
-生成、修复、联网研究、版本对照与批量队列已在主 Pipeline 外层提供受限编排，
-见 [自动化工作流](autonomous-workflow.md)。下文描述单次执行的核心约束。
+VulnForge keeps untrusted source material, trusted execution constraints, model
+decisions, tool effects and verification evidence separate. The production runtime
+does not use a retrieval index: it reads the selected local source files directly
+and loads the trusted knowledge/evaluation card as structured data.
 
-案例知识增强自主研究入口 `CaseAssistant` 将可信知识目录与成功实验报告摘要分开索引，
-按需执行本地案例检索；联网工具只有在调用方显式传入域名白名单后才会注册。该入口每次
-基于最新证据动态选择下一项有类型约束的工具调用，但不部署环境、不执行复现脚本，也不把
-历史或网页资料转化为可信运行配置。
+## Primary CLI path
 
-新增文件工具、本地 Dockerfile 构建、只读配置挂载、Python 脚本执行和独立文件验证，见 [脚本与环境工具](script-tools.md)。下文的原始生命周期也会据知识卡增加这些步骤。
-
-默认执行引擎是 LangGraph。组件各自有清晰接口，图负责节点之间的流转。顺序执行模式复用同一批节点，用于离线检查。主入口 `python -m app.lab.cli` 使用 `app/lab/pipeline.py`。
+The default CLI is implemented by `app/lab/vulhub_run.py`. It is a source-driven
+agent loop, not the staged card-based `Pipeline` described later.
 
 ```mermaid
-flowchart LR
-    R[Researcher: 索引与检索] --> P[Planner: 结构化输出与校验]
-    R -->|资料缺失| C[清理与报告]
-    P -->|计划无效| C
-    P --> D[Executor: 部署阶段]
-    D --> E[Executor: 复现阶段]
-    E --> V[Verifier: 诊断日志与断言]
-    V --> C
+flowchart TD
+    A[CLI: CVE / environment ID] --> B[Research local Vulhub sources]
+    B --> C[Planner: source-cited operations]
+    C --> D[Validate plan and source quotes]
+    D --> E[Snapshot Compose project]
+    E --> F[Check Docker and deploy]
+    F --> G[Reproduction Agent loop]
+    G --> H[Independent evaluator]
+    H --> I[Collect logs and evidence]
+    I --> J[Cleanup and report]
+    G -->|abort / budget exhausted| H
+    B -->|missing / ambiguous| J
+    C -->|invalid / missing info| J
 ```
 
-Executor 的单步有限重试在节点内部执行，不重新调用模型、不修改断言；LangGraph 负责跨阶段路由。它不是多个自由对话 Agent 拼接的系统。
+1. **Research**: `VulhubResearcher` finds one local environment and reads its
+   Compose and Markdown files. Optional model synthesis cites exact source quotes.
+2. **Planning**: the source planner creates typed HTTP/container operations. Each
+   operation must reference an existing source path and exact quote. Operations
+   must preserve readiness, initialization and reproduction ordering.
+3. **Preparation**: the runner copies the selected environment into a per-run
+   workspace, rewrites published ports to loopback and rejects unsafe Compose
+   properties such as host networking and symlink escapes.
+4. **Deployment**: Docker Compose starts the isolated project and waits for readiness.
+5. **Reproduction**: a bounded LangGraph loop chooses one next action at a time
+   from typed operations, source reads and log inspection. Tool results are fed
+   back as observations. The agent cannot directly execute arbitrary host commands.
+6. **Evaluation**: finishing submits the attempt; a separate evaluator reads the
+   reviewed evaluation card and checks observed request structure, response/file
+   evidence and logs. The agent's finish decision is not success.
+7. **Cleanup**: logs are collected and Compose resources are removed unless
+   `--keep` is set. The JSON report and trace preserve the outcome.
 
-## 1. RAG
+## Card-based staged Pipeline API
 
-`app/rag/index.py` 使用 SQLite 保存文档哈希、分块内容、元数据和可选 embedding。文档未变化时不重复计算；删除的文件会从索引删除；更新失败时事务回滚。
+`app/lab/pipeline.py` is a second, reusable staged workflow. It has explicit
+Researcher, Planner, Deployer, Reproducer, Verifier and Cleanup nodes, with LangGraph
+conditional routing or a sequential engine. Its Researcher loads a typed YAML card,
+the complete Compose configuration and declared assets directly. The planner's
+lifecycle is constrained by that card; it cannot add actions or verification
+assertions. The executor re-checks source hashes before side effects.
 
-- Markdown 按标题/行分块，完整保留代码围栏，避免把 Compose 截成不可部署的片段。
-- 每块含稳定内容 ID、相对来源路径、原文起止行、产品、版本和知识卡 ID。
-- 知识卡可选记录 `root_cause`；`CaseAssistant` 还会索引已成功且清理完成的历史报告摘要，便于查回环境服务配置、成因证据与计划步骤。
-- 默认用 BM25，支持中文字符/双字词和英文、版本、CVE 风格标识符。
-- `--dense` 接入实际 embedding 服务，采用余弦检索与 BM25，通过 RRF 融合排序。
-- 支持产品、版本、知识卡过滤、文本去重、top-k 和上下文字符预算。无匹配时返回 `abstained`。
-- 版本过滤目前是字符串精确匹配，不是语义版本区间计算。
-- `--model` 让 Researcher 基于检索内容生成结构化事实，校验引用 ID 和原文引句；引句校验不能证明模型概括一定正确。Planner 的执行参数仍绑定可信知识卡。
-- 部署加载完整知识卡和环境配置，不从检索片段重新拼 Compose。
+This API is used by some higher-level authoring/recovery/comparison components.
+It should not be confused with the primary CLI's dynamic source-driven reproduction
+loop.
 
-```powershell
-python -m app.lab.cli index
-python -m app.lab.cli search "canary file exposure" --top-k 5
-python -m app.lab.cli search "deployment" --card-id DEMO-FILE-EXPOSURE
-python -m app.lab.cli research DEMO-FILE-EXPOSURE
-```
+## Trust boundaries and safety controls
 
-向量模式需要设置 `RAG_EMBEDDING_MODEL` 和提供商认证，再加 `--dense`。模型/向量模式不会静默降级；服务失败时明确报错。切换 embedding 模型或从向量模式切回纯词法模式会重建索引。可用 `--index` 分开保留两个索引。
+- Vulhub Markdown, Compose files, web pages and tool outputs are untrusted data,
+  never instructions that override system policy.
+- YAML cards and evaluation cards are reviewed inputs. They define allowed services,
+  ports, requests, scripts and expected evidence.
+- Model output is parsed into Pydantic schemas and validated before tool execution.
+- HTTP requests are constrained to local published ports. Container commands are
+  argument arrays and run inside declared Compose services.
+- The evaluator does not accept a zero exit code or HTTP status alone as proof.
+  Missing, truncated or ambiguous evidence should remain inconclusive.
+- Cleanup is attempted after failures and interruptions; reports distinguish
+  reproduction status from cleanup status.
 
-目前没有部署独立向量数据库，BM25 和向量打分会加载候选块，适合本地中小知识库；大规模语料需替换为 ANN/服务端检索。内置评测只有一个演示资料包的四个查询，用来验证管线，不代表真实漏洞语料上的召回率。???? API 会在同一组标注查询上并列报告 BM25 与混合检索的 Recall@k、MRR、拒答准确率及差值。真实 embedding 服务尚需联网集成测试，不能用测试中的人工向量当成语义效果评估。
+## Retrieval experiments are separate
 
-???? API 可对真实结构化研究模型做引用完整性和来源对齐评测；引用及原文引句由 Researcher 校验。该指标不判断陈述是否真实，事实正确率仍需人工审核的标准答案。演示数据集见 `examples/retrieval_cases.json` 和 `examples/research_evaluation_cases.json`。
-
-## 2. 结构化 Planner
-
-`app/lab/planning.py` 定义 Pydantic `DeploymentPlan` 和 `Step`。步骤包含阶段、动作、探针 ID、依赖、超时、最大重试次数、原因和证据引用。整个计划绑定知识卡和 Compose 内容哈希。
-
-默认用确定性模板，`--model` 使用模型结构化输出。两个模式都经过相同校验：
-
-- 计划必须是完整、顺序明确的生命周期，复现步骤严格按照知识卡排列。
-- 工具必须在固定集合内，不能新增 shell 命令、目标地址或成功判据。
-- 引用必须存在，哈希必须匹配，不得跳过验证或违背保留/清理配置。
-- 超时和重试次数不得超过调用方预算；`up` 和不可重复请求禁止自动重试。
-- 模型计划无效时最多反馈修正一次，执行工具前完成校验。
-
-```powershell
-python -m app.lab.cli plan DEMO-FILE-EXPOSURE
-python -m app.lab.cli plan DEMO-FILE-EXPOSURE --model
-```
-
-第一版模型 Planner 可细化理由和缩小时间/重试预算，不能随意重排或发明环境操作。这是有意限定的部署计划，不是通用自由规划器。
-
-## 3. Executor
-
-`app/lab/step_executor.py` 严格消费计划，每个阶段按其步骤逐一调用工具。
-
-- 执行前再次校验知识卡、源配置和准备后的 Compose，防止计划后资料发生变化。
-- 对项目名和本地端口加独占文件锁，同一 workspace 中的冲突任务不能同时运行。
-- 每次调用前写入 `running`，结束后写结果、耗时、错误类别和证据。报告以临时文件加原子替换保存。
-- 步骤失败后跳过依赖动作，仍运行诊断、验证和清理；清理状态与验证状态分别保存。
-- HTTP 就绪失败或明确可重复请求的连接错误可有限重试，采用有上限的等待；验证不匹配不会通过反复请求“碰运气”。
-- `up` 超时仍可能已创建容器，因此会尝试清理，不自动重放 `up`。
-- 支持调用方传入取消事件；取消在步骤边界生效，当前同步调用等待返回/超时后清理。
-- 相同实例不允许重放已经执行或状态不确定的步骤；同名报告不覆盖。
-
-```powershell
-# 默认 LangGraph；依赖安装后使用
-python -m app.lab.cli run DEMO-FILE-EXPOSURE --report reports/run-001.json
-
-# 可选：模型规划 + 混合检索
-python -m app.lab.cli run DEMO-FILE-EXPOSURE --model --dense --report reports/run-002.json
-
-# 离线组件检查备用（Docker 仍需运行）
-python -m app.lab.cli run DEMO-FILE-EXPOSURE --engine sequential --report reports/run-003.json
-
-python -m app.lab.cli inspect reports/run-003.json
-```
-
-报告是审计/诊断快照，**不是自动断点续跑授权**。进程被强制终止后可能留下 `running` 步骤、锁和容器；应先检查报告和 Docker 实际状态，再手动清理对应项目及确认失效的锁。不要直接重放可能产生副作用的步骤。锁仅覆盖共享同一 workspace 的本工具实例，不能阻止外部程序占用端口。
-
-HTTP 正文最多保留 64 KiB，Docker 日志默认尾部 100 行，日志限定本次探测开始后的时间。HTTP 超时控制连接/读取并检查正文读取总预算，但不是外部进程级强制截止。Docker CLI 输出目前由 subprocess 捕获，不适合无界大日志任务。
-
-## 验证范围
-
-离线测试覆盖索引更新、混合检索适配器、引用验证、计划修正和拒绝、逐步落盘、并发冲突、超时恢复、取消、清理失败，以及完整组件链路。合成示例已完成真实 LangGraph + Docker 集成验证；注入模型与向量的测试仍不能替代真实模型和 embedding 的效果评估。
-
-```powershell
-python -m unittest discover -s tests -p test_rag.py -v
-python -m unittest discover -s tests -p test_structured_planning.py -v
-python -m unittest discover -s tests -p test_step_executor.py -v
-python -m pytest
-```
+`app/rag/` and the embedding experiment scripts are not imported by the primary
+CLI or the card-based core Pipeline. They remain optional research code for
+comparing lexical/dense retrieval approaches. Removing them from the production
+runtime does not remove the trusted YAML knowledge cards, source documents, or
+direct local source-reading tools.
