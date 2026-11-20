@@ -128,21 +128,25 @@ def main():
         return
     if not args.identifier:
         parser.error("provide a reviewed reproduction-spec identifier")
-    if args.action == "run" and not args.policy_file:
-        parser.error("--action run requires --policy-file; generate a reviewed template with --action policy-preview")
+    if args.action in {"plan", "run"} and not args.policy_file:
+        parser.error(f"--action {args.action} requires --policy-file; generate a reviewed template with --action policy-preview")
     try:
         model = configured_model()
         if args.action == "research":
             result = Researcher(args.specs, model).research(args.identifier)
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return
+        policy = ExecutionPolicy.model_validate(json.loads(args.policy_file.read_text(encoding="utf-8"))) if args.policy_file else None
         if args.action == "plan":
+            catalog = TargetCatalog(args.specs)
+            spec = catalog.get(args.identifier)
+            target = catalog.to_target_spec(spec)
             bundle = Researcher(args.specs, model).research(args.identifier)
             plan = StructuredPlanner(model).generate(
-                bundle, retries=args.retries, timeout=args.timeout, keep=args.keep)
-            print(json.dumps(plan.model_dump(), ensure_ascii=False, indent=2))
+                bundle, target=target, spec=spec, policy=policy,
+                retries=args.retries, timeout=args.timeout, keep=args.keep)
+            print(json.dumps(plan.model_dump(mode="json"), ensure_ascii=False, indent=2))
             return
-        policy = ExecutionPolicy.model_validate(json.loads(args.policy_file.read_text(encoding="utf-8"))) if args.policy_file else None
         project = args.project or f"lab-{uuid4().hex[:12]}"
         report_path = args.report or Path("reports") / f"{project}.json"
         pipeline = Pipeline(
