@@ -224,3 +224,17 @@ No mass deletion or main-branch merge should happen before the relevant migratio
 - Move workflow, agent, execution, tool, and Docker environment implementations into the target package layout without duplicate implementations.
 - Add independent verifier interface and security tests; keep Metasploit optional pending a separate design decision.
 - Run the CI suite and Docker-backed integration path, inspect the reports, and resolve all failures.
+
+ 
+### Latest migration slice
+
+- Added `ReproductionSpec` to `app/domain/reproduction.py` for reviewed reproduction probes, scripts, and independent assertions.
+- Added `TargetCatalog` as the filesystem adapter for reviewed reproduction specs; runtime agents, execution, workflows, and environment adapters now import domain schemas and the catalog directly.
+- Removed the deprecated `legacy_cards.py` and `app/lab/knowledge.py` compatibility modules and the empty `knowledge/` directory.
+- CLI now accepts `--specs` and defaults to `reproductions/`.
+
+### Still required
+
+- Bind `TargetSpec`, `ReproductionSpec`, `ExecutionPolicy`, and `ExecutionPlan` together on the actual Pipeline execution path; fail closed if the target fingerprint or policy does not match.
+- Replace the current card-shaped Pipeline planner/executor contract with the domain plan contract.
+- Validate and run a representative local Vulhub target through Docker, including cleanup and independent verification.

@@ -15,15 +15,15 @@ from app.environments.docker.engine import DockerEngine
 
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("identifier", nargs="?", help="Trusted knowledge-card identifier")
+    parser.add_argument("identifier", nargs="?", help="Reviewed reproduction specification identifier")
     parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate"], default="run")
     parser.add_argument("--targets", type=Path, default=Path("targets/vulhub"),
                         help="Root of the retained Vulhub target corpus")
     parser.add_argument("--query", help="Search query for target-search")
     parser.add_argument("--environment", help="Relative target directory for target-inspect")
     parser.add_argument("--request-file", type=Path, help="JSON ReproductionRequest for request-validate")
-    parser.add_argument("--knowledge", type=Path, default=Path("knowledge/cards"),
-                        help="Directory containing reviewed executable YAML knowledge cards")
+    parser.add_argument("--specs", type=Path, default=Path("reproductions"),
+                        help="Directory containing reviewed YAML reproduction specifications")
     parser.add_argument("--workspace", type=Path, default=Path(".labs"))
     parser.add_argument("--project")
     parser.add_argument("--report", type=Path)
@@ -76,11 +76,11 @@ def main():
     try:
         model = configured_model()
         if args.action == "research":
-            result = Researcher(args.knowledge, model).research(args.identifier)
+            result = Researcher(args.specs, model).research(args.identifier)
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return
         if args.action == "plan":
-            bundle = Researcher(args.knowledge, model).research(args.identifier)
+            bundle = Researcher(args.specs, model).research(args.identifier)
             plan = StructuredPlanner(model).generate(
                 bundle, retries=args.retries, timeout=args.timeout, keep=args.keep)
             print(json.dumps(plan.model_dump(), ensure_ascii=False, indent=2))
@@ -88,7 +88,7 @@ def main():
         project = args.project or f"lab-{uuid4().hex[:12]}"
         report_path = args.report or Path("reports") / f"{project}.json"
         pipeline = Pipeline(
-            args.knowledge, args.workspace, project, llm=model,
+            args.specs, args.workspace, project, llm=model,
             retries=args.retries, timeout=args.timeout, keep=args.keep,
             docker_engine=DockerEngine(), engine_timeout=args.engine_timeout,
             auto_port=not args.fixed_port,

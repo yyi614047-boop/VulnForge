@@ -8,12 +8,12 @@ class TargetCatalog:
     def __init__(self, root: Path):
         self.root = Path(root).resolve()
 
-    def cards(self):
+    def specs(self):
         for path in sorted(self.root.glob("*.yaml")):
             yield ReproductionSpec.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
 
     def get(self, identifier: str) -> ReproductionSpec:
-        matches = [spec for spec in self.cards() if spec.id.lower() == identifier.lower()]
+        matches = [spec for spec in self.specs() if spec.id.lower() == identifier.lower()]
         if len(matches) != 1:
             raise ValueError(f"Expected one reproduction spec for {identifier}; found {len(matches)}")
         return matches[0]
