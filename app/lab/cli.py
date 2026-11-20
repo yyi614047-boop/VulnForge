@@ -34,7 +34,6 @@ def main():
     parser.add_argument("--fixed-port", action="store_true")
     parser.add_argument("--index", type=Path)
     parser.add_argument("--dense", action="store_true", help="Enable hybrid retrieval")
-    parser.add_argument("--model", action="store_true", help="Use a model for research and planning")
     parser.add_argument("--top-k", type=int, default=6)
     parser.add_argument("--card-id")
     parser.add_argument("--product")
@@ -70,7 +69,7 @@ def main():
                 result = VulhubSources(args.knowledge).registry().call(
                     "search_vulhub_environments", {"query": query, "limit": args.top_k}).evidence
             else:
-                result = VulhubResearcher(args.knowledge, source_model() if args.model else None).research(args.query)
+                result = VulhubResearcher(args.knowledge).research(args.query)
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return
 
