@@ -171,7 +171,8 @@ def test_prepare_metasploit_container_moves_bridge_only_container_to_internal_ne
     assert runner.calls[1][:4] == ["docker", "inspect", "msf"]
     assert runner.calls[2][:4] == ["docker", "network", "disconnect", "bridge"]
     assert runner.calls[3][:4] == ["docker", "network", "connect", "lab-shared"]
-    assert runner.calls[4][:3] == ["docker", "inspect", "msf"]
+    assert runner.calls[4][:3] == ["docker", "restart", "msf"]
+    assert runner.calls[5][:3] == ["docker", "inspect", "msf"]
 
 
 def test_prepare_metasploit_container_rejects_rpc_published_on_non_loopback(tmp_path):

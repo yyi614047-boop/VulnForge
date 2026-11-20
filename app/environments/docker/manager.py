@@ -362,6 +362,11 @@ class DockerLab:
         connected = self._invoke(["docker", "network", "connect", network_name, container], timeout)
         if connected.returncode:
             raise ToolExecutionError(f"Cannot attach Metasploit to approved internal network: {connected.stderr}")
+        # Refresh Docker's published-port forwarding after changing the container's
+        # sole network attachment. The RPC listener restarts on the internal interface.
+        restarted = self._invoke(["docker", "restart", container], timeout)
+        if restarted.returncode:
+            raise ToolExecutionError(f"Cannot restart Metasploit after internal-network attachment: {restarted.stderr}")
         verified = self._invoke(["docker", "inspect", container], timeout)
         if verified.returncode:
             raise ToolExecutionError(f"Cannot verify Metasploit network attachment: {verified.stderr}")
