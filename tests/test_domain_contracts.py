@@ -85,6 +85,7 @@ def test_execution_plan_requires_known_topologically_ordered_dependencies():
     plan = ExecutionPlan(
         plan_id="plan-1", target_id=selected.target_id, policy_id="local-reviewed-lab",
         rationale="Deploy, observe, then clean up.",
+        input_fingerprints={"reproduction": "a" * 64, "compose": "b" * 64, "assets": "c" * 64},
         steps=[
             ExecutionStep(step_id="start", phase="deploy", action="up", rationale="Start service", **common),
             ExecutionStep(step_id="probe", phase="reproduce", action="http", depends_on=["start"], rationale="Observe target", **common),
@@ -98,6 +99,7 @@ def test_execution_plan_requires_known_topologically_ordered_dependencies():
         ExecutionPlan(
             plan_id="plan-2", target_id=selected.target_id, policy_id="local-reviewed-lab",
             rationale="Invalid dependency.",
+            input_fingerprints={"reproduction": "a" * 64, "compose": "b" * 64, "assets": "c" * 64},
             steps=[ExecutionStep(step_id="probe", phase="reproduce", action="http", target_id=selected.target_id,
                                  depends_on=["missing"], timeout_seconds=30, rationale="Probe")],
         )
