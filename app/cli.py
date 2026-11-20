@@ -1,6 +1,7 @@
 """Command-line entry point for the staged LangGraph vulnerability Pipeline."""
 import argparse
 import json
+import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -18,10 +19,11 @@ from app.environments.docker.engine import DockerEngine
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("identifier", nargs="?", help="Reviewed reproduction specification identifier")
-    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate", "policy-preview"], default="run")
+    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate", "policy-preview", "metasploit-search"], default="run")
     parser.add_argument("--targets", type=Path, default=Path("targets/vulhub"),
                         help="Root of the retained Vulhub target corpus")
     parser.add_argument("--query", help="Search query for target-search")
+    parser.add_argument("--cve", help="CVE identifier for Metasploit module discovery")
     parser.add_argument("--environment", help="Relative target directory for target-inspect")
     parser.add_argument("--request-file", type=Path, help="JSON ReproductionRequest for request-validate")
     parser.add_argument("--policy-file", type=Path, help="Reviewed JSON ExecutionPolicy required for run")
@@ -42,6 +44,23 @@ def _parser():
 def main():
     parser = _parser()
     args = parser.parse_args()
+    if args.action == "metasploit-search":
+        cve = args.cve or args.identifier
+        if not cve:
+            parser.error("--action metasploit-search requires --cve")
+        from app.integrations.metasploit import MetasploitRPCClient, MetasploitDiscovery
+        url = os.environ.get("METASPLOIT_RPC_URL", "http://127.0.0.1:55553/api/")
+        username = os.environ.get("METASPLOIT_RPC_USERNAME")
+        password = os.environ.get("METASPLOIT_RPC_PASSWORD")
+        if not username or not password:
+            parser.error("Set METASPLOIT_RPC_USERNAME and METASPLOIT_RPC_PASSWORD")
+        client = MetasploitRPCClient(url, username, password)
+        try:
+            candidates = MetasploitDiscovery(client).search_cve(cve)
+            print(json.dumps([item.model_dump(mode="json") for item in candidates], ensure_ascii=False, indent=2))
+        finally:
+            client.close()
+        return
     if args.action == "inspect":
         path = args.inspect or (Path(args.identifier) if args.identifier else None)
         if path is None:
