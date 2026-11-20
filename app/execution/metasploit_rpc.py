@@ -104,8 +104,8 @@ class MetasploitRpcClient:
         )
 
     def call(self, method: str, *params):
-        if not re.fullmatch(r"[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*", method):
-            raise ValueError("Invalid Metasploit RPC method name")
+        if method not in self.ALLOWED_METHODS:
+            raise ValueError("Metasploit RPC method is not exposed by VulnForge")
         if method == "auth.login":
             raise ValueError("Authentication is managed internally")
         if self.token is None:
