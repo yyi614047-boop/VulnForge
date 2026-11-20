@@ -262,4 +262,4 @@ Do not make Metasploit a mandatory runtime dependency until its adapter and secu
 - PoC authoring/generation: explicitly out of scope.
 - Separation of concerns: Researcher discovers and inspects; Planner selects and plans; deterministic policy authorizes; Executor invokes adapters; Verifier independently evaluates evidence; Recovery coordinates bounded retry/replan/backend-switch/abort.
 - Read-only Metasploit CVE discovery and module metadata inspection are implemented on the feature branch through `app/discovery/metasploit.py` and the `metasploit-search` / `metasploit-inspect` CLI actions. They are not yet part of the LangGraph Planner/Executor path.
-- Metasploit RPC execution, policy-bound checks, candidate selection in Planner, and standalone PoC adapters remain unimplemented.
+- Metasploit RPC execution and policy-bound checks remain unimplemented. A target-bound, review-only `PoCExecutionSpec` and deterministic compatibility gate have been added; neither authorizes execution.
