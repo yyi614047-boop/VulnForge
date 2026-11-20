@@ -10,7 +10,7 @@ from pydantic import Field
 from app.lab.document_evidence import compare_document, read_example
 from app.lab.documented_card import DocumentedStep, RequestShape
 from app.lab.knowledge import StrictModel
-from app.rag.providers import configured_model
+from app.lab.model_provider import configured_model
 
 
 class Summary(StrictModel):
