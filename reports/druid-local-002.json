@@ -1,0 +1,11 @@
+{
+  "id": "CVE-2021-25646",
+  "project": "lab-druid-local-002",
+  "status": "execution_error",
+  "cleanup": "not_needed",
+  "observations": [],
+  "workflow": "vulhub_sources",
+  "engine_type": "langgraph",
+  "trace": "F:\\codex-workspace\\VulnForge\\reports\\druid-local-002.trace.jsonl",
+  "error": "Error code: 400 - {'error': {'message': 'Thinking mode does not support this tool_choice (request_id: f7d8b2d8-dfb2-4471-b8a8-3467840a206e)', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}"
+}

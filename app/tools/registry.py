@@ -5,6 +5,8 @@ from typing import Callable
 
 from pydantic import BaseModel, ValidationError
 
+from app.trace import traced_call
+
 
 class ToolRegistryError(Exception):
     """Base class for expected registry and tool errors."""
@@ -86,7 +88,7 @@ class ToolRegistry:
             validated = spec.input_model.model_validate(parameters)
         except ValidationError as exc:
             raise ToolInputValidationError(str(exc)) from exc
-        tool_output = spec.function(validated)
+        tool_output = traced_call("tool", name, validated, lambda: spec.function(validated))
         if isinstance(tool_output, ToolOutput):
             output, evidence = tool_output.output, tool_output.evidence
         else:

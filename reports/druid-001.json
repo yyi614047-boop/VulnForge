@@ -1,0 +1,11 @@
+{
+  "id": "CVE-2021-25646",
+  "project": "lab-6661932bbc33",
+  "status": "execution_error",
+  "cleanup": "not_needed",
+  "observations": [],
+  "workflow": "vulhub_sources",
+  "engine_type": "langgraph",
+  "trace": "F:\\codex-workspace\\VulnForge\\reports\\druid-001.trace.jsonl",
+  "error": "'ascii' codec can't encode characters in position 7-8: ordinal not in range(128)"
+}

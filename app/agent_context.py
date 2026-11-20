@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from functools import wraps
 from uuid import uuid4
 
+from app.trace import traced_call
+
 
 @dataclass
 class AgentContext:
@@ -47,7 +49,8 @@ def invoke_agent(agent_id, model, prompt):
     context = contexts.setdefault(agent_id, AgentContext(run_id, agent_id))
     token = _agent.set(context)
     try:
-        result = model.invoke(deepcopy(prompt))
+        result = traced_call("model", agent_id, {"prompt": prompt},
+                             lambda: model.invoke(deepcopy(prompt)))
         context.turns.append({"prompt": deepcopy(prompt), "result": deepcopy(result)})
         del context.turns[:-16]
         return result

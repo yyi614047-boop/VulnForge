@@ -1,0 +1,165 @@
+{
+  "id": "1panel-CVE-2024-39907",
+  "status": "information_missing",
+  "error": "Document evidence loaded; no executable deployment plan is available.",
+  "cleanup": "not_needed",
+  "engine": null,
+  "research": {
+    "document_review": {
+      "id": "1panel-CVE-2024-39907",
+      "document_check_status": "matched",
+      "source": "vulhub/1panel/CVE-2024-39907/README.zh-cn.md",
+      "extraction": "llm",
+      "runtime_status": "not_observed",
+      "summary": {
+        "prerequisite": "文档要求已登录 1Panel 控制面板，且目标为受影响版本（1Panel v1.10.9-lts 及更早）。",
+        "documented_effect": "文档声称 orderBy 参数缺乏适当输入验证，导致 SQL 注入；后端处理请求时会执行注入的 SQL 而不进行验证，可在服务器文件系统上创建任意文件，并可能最终实现远程命令执行。",
+        "expected_file_paths": [
+          "/tmp/randstr.txt"
+        ],
+        "method": "POST",
+        "request_shape": {
+          "media_type": "application/json",
+          "required_cookie_names": [
+            "psession"
+          ],
+          "json_fields": {
+            "page": "integer",
+            "pageSize": "integer",
+            "groupID": "integer",
+            "orderBy": "string",
+            "order": "string",
+            "name": "string"
+          }
+        }
+      },
+      "document_checks": [
+        {
+          "field": "method",
+          "operator": "equals",
+          "expected": "POST",
+          "observed": "POST",
+          "status": "match"
+        },
+        {
+          "field": "media_type",
+          "operator": "equals",
+          "expected": "application/json",
+          "observed": "application/json",
+          "status": "match"
+        },
+        {
+          "field": "cookie.psession",
+          "operator": "present",
+          "expected": true,
+          "observed": true,
+          "status": "match"
+        },
+        {
+          "field": "json.page",
+          "operator": "type",
+          "expected": "integer",
+          "observed": "integer",
+          "status": "match"
+        },
+        {
+          "field": "json.pageSize",
+          "operator": "type",
+          "expected": "integer",
+          "observed": "integer",
+          "status": "match"
+        },
+        {
+          "field": "json.groupID",
+          "operator": "type",
+          "expected": "integer",
+          "observed": "integer",
+          "status": "match"
+        },
+        {
+          "field": "json.orderBy",
+          "operator": "type",
+          "expected": "string",
+          "observed": "string",
+          "status": "match"
+        },
+        {
+          "field": "json.order",
+          "operator": "type",
+          "expected": "string",
+          "observed": "string",
+          "status": "match"
+        },
+        {
+          "field": "json.name",
+          "operator": "type",
+          "expected": "string",
+          "observed": "string",
+          "status": "match"
+        },
+        {
+          "field": "expected_file_paths",
+          "operator": "reviewed_set_and_source_literal",
+          "expected": [
+            "/tmp/randstr.txt"
+          ],
+          "observed": [
+            "/tmp/randstr.txt"
+          ],
+          "source_lines": {
+            "/tmp/randstr.txt": [
+              49
+            ]
+          },
+          "status": "match"
+        },
+        {
+          "field": "json.field_names",
+          "operator": "set_equals",
+          "expected": [
+            "groupID",
+            "name",
+            "order",
+            "orderBy",
+            "page",
+            "pageSize"
+          ],
+          "observed": [
+            "groupID",
+            "name",
+            "order",
+            "orderBy",
+            "page",
+            "pageSize"
+          ],
+          "status": "match"
+        },
+        {
+          "field": "cookie.names",
+          "operator": "set_equals",
+          "expected": [
+            "psession"
+          ],
+          "observed": [
+            "psession"
+          ],
+          "status": "match"
+        }
+      ]
+    }
+  },
+  "plan": {
+    "stage": "planning",
+    "document_checks": "matched",
+    "runtime_status": "not_observed",
+    "unavailable": [
+      "deployment environment",
+      "validated execution plan"
+    ],
+    "skipped": [
+      "deploy",
+      "reproduce",
+      "verify"
+    ]
+  }
+}

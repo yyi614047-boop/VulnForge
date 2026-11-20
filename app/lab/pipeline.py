@@ -25,9 +25,10 @@ class PipelineState(TypedDict, total=False):
 class Pipeline:
     def __init__(self, knowledge: Path, workspace: Path, project: str, *, index_path=None,
                  embedder=None, llm=None, retries=1, timeout=60, keep=False, executor_options=None,
-                 docker_engine=None, engine_timeout=120, auto_port=False):
+                 docker_engine=None, engine_timeout=120, auto_port=False, documented=None):
         """初始化组件及其运行所需的配置、依赖和状态。"""
         self._run_lock = Lock()
+        self.documented = documented
         self.knowledge, self.workspace, self.project = knowledge, workspace, project
         self.researcher = Researcher(RetrievalIndex(knowledge, index_path or workspace / "rag.sqlite", embedder), llm)
         self.planner = StructuredPlanner(llm)
@@ -42,6 +43,10 @@ class Pipeline:
     def research(self, state):
         """读取实验标识并检索可信资料，更新管线研究状态。"""
         try:
+            if self.documented is not None:
+                from app.lab.document_summary import read_review
+                review = read_review(self.documented, state["identifier"])
+                return {"bundle": {"document_review": review}, "status": "researched"}
             return {"bundle": self.researcher.research(state["identifier"]), "status": "researched"}
         except Exception as exc:
             return {"status": "information_missing", "error": str(exc)}
@@ -51,6 +56,14 @@ class Pipeline:
         """根据研究包生成结构化计划并更新管线规划状态。"""
         if state.get("status") != "researched":
             return {}
+        if self.documented is not None:
+            review = state["bundle"]["document_review"]
+            return {"status": "information_missing",
+                    "error": "Document evidence loaded; no executable deployment plan is available.",
+                    "plan": {"stage": "planning", "document_checks": review["document_check_status"],
+                             "runtime_status": review["runtime_status"],
+                             "unavailable": ["deployment environment", "validated execution plan"],
+                             "skipped": ["deploy", "reproduce", "verify"]}}
         try:
             plan = self.planner.generate(state["bundle"], retries=self.retries, timeout=self.timeout, keep=self.keep)
             return {"plan": plan.model_dump(), "status": "planned"}
@@ -150,7 +163,7 @@ class Pipeline:
         graph = self.graph() if engine == "langgraph" else None
         if report_path.exists():
             raise FileExistsError("Report exists; choose a new report path")
-        if self.auto_port:
+        if self.auto_port and self.documented is None:
             from app.lab.ports import prepare_port
             try:
                 self.knowledge, self.port_selection = prepare_port(self.knowledge, self.workspace, identifier)
@@ -161,7 +174,8 @@ class Pipeline:
                 report = {"id": identifier, "status": "information_missing", "cleanup": "not_needed", "error": str(exc)}
                 atomic_json(report_path, report)
                 return report
-        self.executor = StepExecutor(self.knowledge, self.workspace, self.project, report_path, **self.executor_options)
+        if self.documented is None:
+            self.executor = StepExecutor(self.knowledge, self.workspace, self.project, report_path, **self.executor_options)
         state = {"identifier": identifier}
         try:
             if graph:

