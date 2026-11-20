@@ -62,7 +62,7 @@ class ScriptAuthoring:
         self.docker_engine, self.engine_timeout = docker_engine, engine_timeout
 
     @agent_session
-    def run(self, identifier, report_path, *, initial_feedback=None)
+    def run(self, identifier, report_path, *, initial_feedback=None):
         """启动一次完整实验，并将最终报告写入指定路径。"""
         report_path = Path(report_path)
         if report_path.exists():

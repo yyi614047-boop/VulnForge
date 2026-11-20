@@ -129,7 +129,7 @@ class Pipeline:
         graph.add_edge("cleanup", END)
         return graph.compile()
 
-    def run(self, identifier, report_path)
+    def run(self, identifier, report_path):
         """启动一次完整实验，并将最终报告写入指定路径。"""
         if not self._run_lock.acquire(blocking=False):
             raise RuntimeError("Pipeline instance already running; use a separate instance")
@@ -141,7 +141,7 @@ class Pipeline:
             self._run_lock.release()
 
     @isolated_run
-    def _run_isolated(self, identifier, report_path)
+    def _run_isolated(self, identifier, report_path):
         """在隔离上下文中执行指定工作流引擎对应的一次实验。"""
         self.active = False
         self.port_selection = None

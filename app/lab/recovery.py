@@ -33,7 +33,7 @@ class Recovery:
         self.pipeline_factory = pipeline_factory
 
     @agent_session
-    def run(self, identifier, path)
+    def run(self, identifier, path):
         """启动一次完整实验，并将最终报告写入指定路径。"""
         path = Path(path)
         if path.exists():
