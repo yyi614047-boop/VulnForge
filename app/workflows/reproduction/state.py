@@ -4,7 +4,6 @@ class PipelineState(TypedDict, total=False):
     identifier: str
     bundle: dict
     plan: dict
-    domain_plan: dict
     target_spec: dict
     reproduction_spec: dict
     report: dict
