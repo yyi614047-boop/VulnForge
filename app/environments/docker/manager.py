@@ -4,6 +4,7 @@ Only a deliberately small Compose subset is accepted. Documents are data, never
 shell scripts. Container readiness does not imply vulnerability reproduction.
 """
 
+import ipaddress
 import json
 import re
 import subprocess
@@ -300,6 +301,87 @@ class DockerLab:
             raise ToolExecutionError(f"Evidence collection failed: {result.stderr}")
         evidence = json.loads(result.stdout)
         return {**evidence, "service": service, "path": path}
+
+
+    def resolve_target_endpoint(self, service: str, published_port: int, *, network_name: str, metasploit_container: str, timeout: int = 15) -> dict:
+        """Resolve one running Compose service to its private container IP/port.
+
+        The published port must be explicitly bound to loopback in the reviewed
+        Compose file. The returned private endpoint is intended for a separately
+        network-attached Metasploit container, never for arbitrary host targets.
+        """
+        config = self.configuration()
+        if service not in config["services"]:
+            raise ValueError("Target service is not declared in the reviewed Compose file")
+        declared = config["services"][service].get("ports", [])
+        if not any(
+            isinstance(item, str)
+            and re.fullmatch(rf"127\.0\.0\.1:{published_port}:[0-9]+(?:/tcp)?", item)
+            for item in declared
+        ):
+            raise ValueError("Target port must be explicitly published on loopback as TCP")
+
+        listed = self._invoke([*self._prefix(), "ps", "-q", service], timeout)
+        if listed.returncode:
+            raise ToolExecutionError(f"Cannot list target container: {listed.stderr}")
+        container_ids = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+        if len(container_ids) != 1:
+            raise ValueError("Expected exactly one container for the selected target service")
+        inspected = self._invoke(["docker", "inspect", container_ids[0]], timeout)
+        if inspected.returncode:
+            raise ToolExecutionError(f"Cannot inspect target container: {inspected.stderr}")
+        try:
+            rows = json.loads(inspected.stdout)
+            if not isinstance(rows, list) or len(rows) != 1:
+                raise ValueError("Unexpected Docker inspect response")
+            row = rows[0]
+            if row.get("State", {}).get("Running") is not True:
+                raise ValueError("Selected target container is not running")
+            port_map = row.get("NetworkSettings", {}).get("Ports") or {}
+            matches = []
+            for container_binding, host_bindings in port_map.items():
+                match = re.fullmatch(r"([0-9]+)/tcp", str(container_binding))
+                if not match or not isinstance(host_bindings, list):
+                    continue
+                for binding in host_bindings:
+                    if (binding.get("HostIp") == "127.0.0.1"
+                            and str(binding.get("HostPort")) == str(published_port)):
+                        matches.append(int(match.group(1)))
+            if len(matches) != 1:
+                raise ValueError("Published target port does not resolve to exactly one TCP container port")
+            networks = row.get("NetworkSettings", {}).get("Networks") or {}
+            network = networks.get(network_name)
+            if not isinstance(network, dict) or not network.get("IPAddress"):
+                raise ValueError("Target container is not attached to the requested Metasploit network")
+            ip = ipaddress.ip_address(network["IPAddress"])
+            if ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local:
+                raise ValueError("Selected target network must provide a private, non-loopback IPv4 address")
+            address = str(ip)
+            msf_inspected = self._invoke(["docker", "inspect", metasploit_container], timeout)
+            if msf_inspected.returncode:
+                raise ValueError("Cannot inspect the configured Metasploit container")
+            msf_rows = json.loads(msf_inspected.stdout)
+            if not isinstance(msf_rows, list) or len(msf_rows) != 1:
+                raise ValueError("Unexpected Metasploit container inspect response")
+            msf_row = msf_rows[0]
+            if msf_row.get("State", {}).get("Running") is not True:
+                raise ValueError("Configured Metasploit container is not running")
+            msf_network = (msf_row.get("NetworkSettings", {}).get("Networks") or {}).get(network_name)
+            if not isinstance(msf_network, dict) or not msf_network.get("IPAddress"):
+                raise ValueError("Metasploit container is not attached to the selected target network")
+            return {
+                "project": self.project,
+                "service": service,
+                "container_id": container_ids[0],
+                "host": address,
+                "port": matches[0],
+                "published_host_port": published_port,
+                "network": network_name,
+                "metasploit_container": metasploit_container,
+                "metasploit_network_ip": msf_network["IPAddress"],
+            }
+        except (KeyError, TypeError, ValueError, ipaddress.AddressValueError) as exc:
+            raise ValueError(f"Cannot safely resolve target endpoint: {exc}") from exc
 
     def probe_version(self, service, command, *, timeout=30):
         if service not in self.configuration()["services"]:
