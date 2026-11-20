@@ -121,7 +121,7 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
     target_image = "python:3.11-alpine"
     password = "vf-test-" + uuid4().hex
 
-    if docker("info", timeout=10).returncode:
+    if docker("info", timeout=30).returncode:
         pytest.skip("Docker daemon is unavailable")
     for image in (target_image, msf_image):
         if docker("image", "inspect", image).returncode:
