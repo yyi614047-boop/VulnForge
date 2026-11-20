@@ -19,7 +19,7 @@ from app.environments.docker.engine import DockerEngine
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("identifier", nargs="?", help="Reviewed reproduction specification identifier")
-    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate", "policy-preview", "metasploit-search", "metasploit-assess", "metasploit-prepare", "metasploit-check"], default="run")
+    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate", "policy-preview", "metasploit-search", "metasploit-assess", "metasploit-prepare", "metasploit-check", "docker-target-resolve"], default="run")
     parser.add_argument("--targets", type=Path, default=Path("targets/vulhub"),
                         help="Root of the retained Vulhub target corpus")
     parser.add_argument("--query", help="Search query for target-search")
@@ -118,6 +118,33 @@ def main():
             client.close()
         return
 
+
+
+    if args.action == "docker-target-resolve":
+        if not args.identifier or not args.project or not args.metasploit_network or not args.metasploit_container:
+            parser.error("--action docker-target-resolve requires spec identifier, --project, --metasploit-network, and --metasploit-container")
+        from app.environments.docker.manager import DockerLab
+        spec = TargetCatalog(args.specs).get(args.identifier)
+        compose_path = args.workspace / args.project / "compose.json"
+        if not compose_path.is_file():
+            parser.error(f"Prepared lab does not exist: {compose_path}")
+        lab = DockerLab(compose_path, args.project)
+        endpoint = lab.resolve_target_endpoint(
+            spec.service, spec.port,
+            network_name=args.metasploit_network,
+            metasploit_container=args.metasploit_container,
+        )
+        print(json.dumps({
+            "target_id": spec.id,
+            "service": endpoint["service"],
+            "target_host": endpoint["host"],
+            "target_port": endpoint["port"],
+            "published_host_port": endpoint["published_host_port"],
+            "docker_network": endpoint["network"],
+            "metasploit_container": endpoint["metasploit_container"],
+            "metasploit_network_ip": endpoint["metasploit_network_ip"],
+        }, ensure_ascii=False, indent=2))
+        return
 
     if args.action == "metasploit-check":
         required = {
@@ -223,12 +250,16 @@ def main():
             discovery = MetasploitDiscovery(client)
             candidates = discovery.search_cve(cve, limit=args.candidate_limit)
             prepared = []
+            overrides = json.loads(args.module_options_file.read_text(encoding="utf-8")) if args.module_options_file else {}
+            if not isinstance(overrides, dict):
+                parser.error("--module-options-file must contain a JSON object")
             for candidate in candidates:
                 metadata = discovery.inspect(candidate)
                 option_result = prepare_module_options(
                     candidate, metadata,
                     target_host=args.target_host,
                     target_port=args.target_port if args.target_port is not None else spec.port,
+                    overrides=overrides,
                 )
                 prepared.append({
                     "candidate": candidate.model_dump(mode="json"),
