@@ -10,7 +10,7 @@ def digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-﻿"""Content manifest binding local environment and scripts to a research result."""
+"""Content manifest binding local environment and scripts to a research result."""
 import ast
 
 
