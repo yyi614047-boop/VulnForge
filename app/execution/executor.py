@@ -20,6 +20,11 @@ from app.tools.registry import ToolTimeoutError
 from app.tools.builtin.filesystem import WorkspaceFiles, WriteParams, local_path, file_hash
 from app.environments.docker.manager import environment_assets
 from app.execution.artifacts import collect_assets
+from app.domain.plans import ExecutionPlan
+from app.domain.policies import ExecutionPolicy
+from app.domain.targets import TargetSpec
+from app.domain.reproduction import ReproductionSpec
+from app.execution.plan_adapter import to_execution_plan
 
 
 def atomic_json(path: Path, payload):
@@ -68,13 +73,22 @@ class StepExecutor:
         self.file_observations = {}
         self.artifacts = {}
 
-    def open(self, plan: DeploymentPlan, bundle: dict, *, retries=1, timeout=60, keep=False):
+    def open(self, plan: DeploymentPlan, bundle: dict, *, retries=1, timeout=60, keep=False, domain_plan: dict | ExecutionPlan | None = None, execution_policy: ExecutionPolicy | None = None, target_spec: TargetSpec | None = None, reproduction_spec: ReproductionSpec | None = None):
         """校验计划、知识卡和资产，并初始化持久化执行报告。"""
         if self.report is not None:
             raise ValueError("Executor instances are single-run")
+        if execution_policy is None or target_spec is None or reproduction_spec is None or domain_plan is None:
+            raise PermissionError("ExecutionPolicy, approved TargetSpec, ReproductionSpec, and validated ExecutionPlan are required")
+        domain_plan = ExecutionPlan.model_validate(domain_plan)
+        expected_domain_plan = to_execution_plan(plan, target_spec, reproduction_spec, execution_policy)
+        if domain_plan.model_dump(mode="json") != expected_domain_plan.model_dump(mode="json"):
+            raise PermissionError("Execution plan changed after policy validation")
+        domain_plan.validate_policy(execution_policy, target_spec, reproduction_spec)
         self.plan = validate_deployment_plan(plan, bundle, retries=retries, timeout=timeout, keep=keep)
         self.recovery_remaining = self.recovery_budget
         self.card, self.bundle = Card.model_validate(bundle["card"]), bundle
+        self.domain_plan, self.execution_policy = domain_plan, execution_policy
+        self.target_spec, self.reproduction_spec = target_spec, reproduction_spec
         # Detect source changes between research and execution, before side effects.
         current = self.kb.get(self.card.id)
         config = load_compose(self.kb.environment(current))
@@ -93,7 +107,7 @@ class StepExecutor:
             if self.report_path.exists():
                 raise FileExistsError("Report already exists; choose a new report path to preserve prior evidence")
             self.report = {"id": self.card.id, "project": self.project, "status": "pending", "cleanup": "not_needed",
-                           "research": bundle, "plan": plan.model_dump(), "steps": [], "events": [],
+                           "research": bundle, "plan": plan.model_dump(), "domain_plan": domain_plan.model_dump(mode="json"), "steps": [], "events": [],
                            "started_at": datetime.now(timezone.utc).isoformat()}
             self.save()
         except BaseException:

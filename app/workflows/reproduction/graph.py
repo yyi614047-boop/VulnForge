@@ -10,11 +10,16 @@ from app.execution.executor import StepExecutor, atomic_json
 from app.agents.researcher import Researcher
 from app.environments.docker.engine import EngineParams
 from app.workflows.reproduction.state import PipelineState
+from app.domain.policies import ExecutionPolicy
+from app.domain.targets import TargetSpec
+from app.domain.reproduction import ReproductionSpec
+from app.targets.vulhub.catalog import TargetCatalog
+from app.execution.plan_adapter import to_execution_plan
 
 
 class Pipeline:
     def __init__(self, knowledge: Path, workspace: Path, project: str, *, llm=None, retries=1, timeout=60, keep=False, executor_options=None,
-                 docker_engine=None, engine_timeout=120, auto_port=False):
+                 docker_engine=None, engine_timeout=120, auto_port=False, execution_policy: ExecutionPolicy | None = None):
         """初始化组件及其运行所需的配置、依赖和状态。"""
         self._run_lock = Lock()
         self.knowledge, self.workspace, self.project = knowledge, workspace, project
@@ -27,6 +32,7 @@ class Pipeline:
         self.active = False
         self.docker_engine, self.engine_timeout = docker_engine, engine_timeout
         self.auto_port, self.port_selection = auto_port, None
+        self.execution_policy = execution_policy
 
     @state_boundary(reads=['identifier'], writes=['bundle', 'status', 'error'])
     def research(self, state):
@@ -36,22 +42,37 @@ class Pipeline:
         except Exception as exc:
             return {"status": "information_missing", "error": str(exc)}
 
-    @state_boundary(reads=['status', 'bundle'], writes=['plan', 'status', 'error'])
+    @state_boundary(reads=['status', 'bundle', 'identifier'], writes=['plan', 'domain_plan', 'target_spec', 'reproduction_spec', 'status', 'error'])
     def plan(self, state):
         """根据研究包生成结构化计划并更新管线规划状态。"""
         if state.get("status") != "researched":
             return {}
         try:
             plan = self.planner.generate(state["bundle"], retries=self.retries, timeout=self.timeout, keep=self.keep)
-            return {"plan": plan.model_dump(), "status": "planned"}
+            catalog = TargetCatalog(self.knowledge)
+            reproduction_spec = catalog.get(state["identifier"])
+            target_spec = catalog.to_target_spec(reproduction_spec)
+            if self.execution_policy is None:
+                return {"plan": plan.model_dump(), "status": "planned",
+                        "error": "ExecutionPolicy is required before any deployment or reproduction side effect"}
+            domain_plan = to_execution_plan(plan, target_spec, reproduction_spec, self.execution_policy)
+            return {
+                "plan": plan.model_dump(),
+                "domain_plan": domain_plan.model_dump(mode="json"),
+                "target_spec": target_spec.model_dump(mode="json"),
+                "reproduction_spec": reproduction_spec.model_dump(mode="json"),
+                "status": "planned",
+            }
         except Exception as exc:
             return {"status": "invalid_plan", "error": str(exc)}
 
-    @state_boundary(reads=['status', 'plan', 'bundle'], writes=['status', 'engine', 'error'])
+    @state_boundary(reads=['status', 'plan', 'bundle', 'domain_plan', 'target_spec', 'reproduction_spec'], writes=['status', 'engine', 'error'])
     def deploy(self, state):
         """确保 Docker 就绪并部署计划中的实验环境。"""
         if state.get("status") != "planned":
             return {}
+        if self.execution_policy is None or not state.get("domain_plan"):
+            return {"status": "policy_denied", "error": "ExecutionPolicy validation is required before deployment"}
         engine = {}
         try:
             if self.docker_engine is not None:
@@ -59,7 +80,13 @@ class Pipeline:
                 if not engine["ready"]:
                     return {"status": "environment_error", "engine": engine,
                             "error": engine.get("error", engine.get("last_probe_error", "Docker engine unavailable"))}
-            self.executor.open(self.planner_plan(state), state["bundle"], retries=self.retries, timeout=self.timeout, keep=self.keep)
+            self.executor.open(
+                self.planner_plan(state), state["bundle"],
+                retries=self.retries, timeout=self.timeout, keep=self.keep,
+                domain_plan=state["domain_plan"], execution_policy=self.execution_policy,
+                target_spec=TargetSpec.model_validate(state["target_spec"]),
+                reproduction_spec=ReproductionSpec.model_validate(state["reproduction_spec"]),
+            )
             self.active = True
             if engine:
                 self.executor.report["engine"] = engine
@@ -72,7 +99,7 @@ class Pipeline:
     @staticmethod
     def planner_plan(state):
         """把管线状态中的字典形式计划转换为 Pydantic 模型。"""
-        from app.lab.planning import DeploymentPlan
+        from app.agents.planner import DeploymentPlan
         return DeploymentPlan.model_validate(state["plan"])
 
     @state_boundary(reads=[], writes=['status'])
@@ -91,7 +118,7 @@ class Pipeline:
             return {"status": self.executor.report["status"]}
         return {}
 
-    @state_boundary(reads=['identifier', 'status', 'error', 'engine', 'bundle', 'plan'], writes=['report', 'status'])
+    @state_boundary(reads=['identifier', 'status', 'error', 'engine', 'bundle', 'plan', 'domain_plan'], writes=['report', 'status'])
     def cleanup(self, state):
         """清理实验资源并保存最终执行报告。"""
         if self.active:

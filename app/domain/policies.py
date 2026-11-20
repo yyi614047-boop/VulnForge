@@ -56,6 +56,8 @@ class ExecutionPolicy(DomainModel):
             raise PermissionError(f"Action {action!r} is not allowed")
         if not 1 <= timeout_seconds <= self.max_timeout_seconds:
             raise PermissionError("Action timeout exceeds execution policy")
+        if retries and action not in self.retryable_actions:
+            raise PermissionError("This action is not approved for retry")
         if not 0 <= retries <= self.max_retries_per_step:
             raise PermissionError("Action retry count exceeds execution policy")
         if action == "build" and not self.allow_image_build:

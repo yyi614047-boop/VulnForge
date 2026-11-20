@@ -47,7 +47,7 @@ class VersionProbe(StrictModel):
             re.compile(self.expected_pattern)
         except re.error as exc:
             raise ValueError("Invalid version pattern") from exc
-        if any(not part or "\\x00" in part or len(part) > 4096 for part in self.command):
+        if any(not part or "\x00" in part or len(part) > 4096 for part in self.command):
             raise ValueError("Invalid version probe argument")
         return self
 
