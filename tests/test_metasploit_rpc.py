@@ -199,3 +199,24 @@ def test_callback_host_and_payload_options_are_policy_gated():
     with pytest.raises(PermissionError, match="LHOST"):
         adapter._validate_binding(spec, candidate, target, policy, "check")
     assert client.calls == []
+
+
+def test_execute_stops_only_new_sessions_matching_this_target_and_module():
+    target, candidate, spec, policy = fixture()
+    client = FakeClient([
+        ("module.check", {"job_id": 1, "uuid": "check-clean"}),
+        ("module.results", {"status": "completed", "result": {"code": "vulnerable"}}),
+        ("session.list", {}),
+        ("module.execute", {"job_id": 2, "uuid": "exec-clean"}),
+        ("module.results", {"status": "completed", "result": {"message": "done"}}),
+        ("session.list", {
+            "9": {"target_host": "127.0.0.1", "via_exploit": "exploit/linux/http/demo"},
+            "10": {"target_host": "192.0.2.8", "via_exploit": "exploit/linux/http/demo"},
+        }),
+        ("session.stop", True),
+    ])
+    adapter = MetasploitRpcAdapter(client, poll_interval=0.1)
+    check = adapter.check(spec, candidate, target, policy, timeout=2)
+    result = adapter.execute(spec, candidate, target, policy, check, timeout=2)
+    assert result.cleaned_session_ids == [9]
+    assert client.calls[-1] == ("session.stop", ("9" if False else 9,))
