@@ -262,3 +262,19 @@ Do not make Metasploit a mandatory runtime dependency until its adapter and secu
 - PoC authoring/generation: explicitly out of scope.
 - Separation of concerns: Researcher discovers and inspects; Planner selects and plans; deterministic policy authorizes; Executor invokes adapters; Verifier independently evaluates evidence; Recovery coordinates bounded retry/replan/backend-switch/abort.
 - Metasploit-first discovery and RPC execution are target capabilities, not yet implemented on this branch.
+
+
+## 13. Metasploit and Docker deployment boundary
+
+The planned Metasploit integration does not require Docker-in-Docker (DinD). Run VulnForge, Metasploit Framework, and vulnerable lab targets as separate services/containers. A trusted host Docker Engine (or separately provisioned remote Engine) owns lab lifecycle.
+
+- Metasploit communicates with VulnForge over an authenticated private RPC management network.
+- Metasploit receives no Docker socket, host Docker credentials, privileged mode, or unnecessary host mounts.
+- A separately controlled attack network allows Metasploit to reach only the selected target services; targets do not receive routes to the management network.
+- Docker Engine access is a high-privilege capability. Keep it behind a narrowly configured and reviewed control boundary; never expose unauthenticated Docker TCP.
+- Start with read-only Metasploit discovery and module inspection. Check and exploit operations require separate explicit policy authorization, bounded options/timeouts, evidence verification, and cleanup.
+- DinD is not the default. Reconsider it only if per-run daemon isolation is a demonstrated requirement that cannot be met with a dedicated remote Engine or disposable VM.
+
+Detailed deployment topology, RPC security, network planes, rollout phases, and acceptance checklist: [Metasploit and Docker Deployment Architecture](metasploit-docker-deployment.md).
+
+This is a design proposal, not an implementation claim. Metasploit RPC integration and container egress isolation remain pending.
