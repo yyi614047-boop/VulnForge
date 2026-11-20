@@ -15,7 +15,6 @@ from app.domain.plans import ExecutionPlan
 from app.domain.targets import TargetSpec
 from app.domain.reproduction import ReproductionSpec
 from app.targets.vulhub.catalog import TargetCatalog
-from app.execution.plan_adapter import to_execution_plan
 
 
 class Pipeline:
@@ -47,21 +46,21 @@ class Pipeline:
 
     @state_boundary(reads=['status', 'bundle', 'identifier'], writes=['plan', 'domain_plan', 'target_spec', 'reproduction_spec', 'status', 'error'])
     def plan(self, state):
-        """根据研究包生成结构化计划并更新管线规划状态。"""
+        """Generate the canonical domain plan against the selected target and policy."""
         if state.get("status") != "researched":
             return {}
         try:
-            plan = self.planner.generate(state["bundle"], retries=self.retries, timeout=self.timeout, keep=self.keep)
             catalog = TargetCatalog(self.knowledge)
             reproduction_spec = catalog.get(state["identifier"])
             target_spec = catalog.to_target_spec(reproduction_spec)
             if self.execution_policy is None:
-                return {"plan": plan.model_dump(), "status": "planned",
-                        "error": "ExecutionPolicy is required before any deployment or reproduction side effect"}
-            domain_plan = to_execution_plan(plan, target_spec, reproduction_spec, self.execution_policy)
+                return {"status": "policy_denied", "error": "ExecutionPolicy is required before planning or execution"}
+            plan = self.planner.generate(
+                state["bundle"], target=target_spec, spec=reproduction_spec,
+                policy=self.execution_policy, retries=self.retries, timeout=self.timeout, keep=self.keep,
+            )
             return {
-                "plan": plan.model_dump(),
-                "domain_plan": domain_plan.model_dump(mode="json"),
+                "plan": plan.model_dump(mode="json"),
                 "target_spec": target_spec.model_dump(mode="json"),
                 "reproduction_spec": reproduction_spec.model_dump(mode="json"),
                 "status": "planned",
@@ -69,32 +68,30 @@ class Pipeline:
         except Exception as exc:
             return {"status": "invalid_plan", "error": str(exc)}
 
-    @state_boundary(reads=['status', 'plan', 'bundle', 'domain_plan', 'target_spec', 'reproduction_spec'], writes=['status', 'engine', 'error'])
+    @state_boundary(reads=['status', 'plan', 'bundle', 'target_spec', 'reproduction_spec'], writes=['status', 'engine', 'error'])
     def deploy(self, state):
-        """确保 Docker 就绪并部署计划中的实验环境。"""
+        """Revalidate the canonical plan before starting Docker or target processes."""
         if state.get("status") != "planned":
             return {}
-        if self.execution_policy is None or not state.get("domain_plan"):
-            return {"status": "policy_denied", "error": "ExecutionPolicy validation is required before deployment"}
+        if self.execution_policy is None:
+            return {"status": "policy_denied", "error": "ExecutionPolicy is required before deployment"}
         try:
+            plan = ExecutionPlan.model_validate(state["plan"])
             target = TargetSpec.model_validate(state["target_spec"])
             reproduction = ReproductionSpec.model_validate(state["reproduction_spec"])
-            domain_plan = ExecutionPlan.model_validate(state["domain_plan"])
-            expected = to_execution_plan(self.planner_plan(state), target, reproduction, self.execution_policy)
-            if domain_plan.model_dump(mode="json") != expected.model_dump(mode="json"):
-                raise PermissionError("Domain plan changed after policy validation")
-            domain_plan.validate_policy(self.execution_policy, target, reproduction)
+            plan.validate_policy(self.execution_policy, target, reproduction)
+            if plan.input_fingerprints != {
+                "reproduction": state["bundle"]["card_hash"],
+                "compose": state["bundle"]["compose_hash"],
+                "assets": state["bundle"]["assets_hash"],
+            }:
+                raise PermissionError("Plan provenance changed after planning")
         except Exception as exc:
             return {"status": "policy_denied", "error": str(exc)}
         engine = {}
         try:
-            self.executor.open(
-                self.planner_plan(state), state["bundle"],
-                retries=self.retries, timeout=self.timeout, keep=self.keep,
-                domain_plan=state["domain_plan"], execution_policy=self.execution_policy,
-                target_spec=TargetSpec.model_validate(state["target_spec"]),
-                reproduction_spec=ReproductionSpec.model_validate(state["reproduction_spec"]),
-            )
+            self.executor.open(plan, state["bundle"], execution_policy=self.execution_policy,
+                               target_spec=target, reproduction_spec=reproduction)
             self.active = True
             if self.docker_engine is not None:
                 engine = self.docker_engine.ensure(EngineParams(timeout=self.engine_timeout)).evidence
@@ -110,12 +107,6 @@ class Pipeline:
             return {"status": "policy_denied", "error": str(exc), "engine": engine}
         except Exception as exc:
             return {"status": "environment_error", "error": str(exc), "engine": engine}
-
-    @staticmethod
-    def planner_plan(state):
-        """把管线状态中的字典形式计划转换为 Pydantic 模型。"""
-        from app.agents.planner import DeploymentPlan
-        return DeploymentPlan.model_validate(state["plan"])
 
     @state_boundary(reads=[], writes=['status'])
     def reproduce(self, state):
