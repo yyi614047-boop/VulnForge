@@ -30,7 +30,7 @@ def reviewed_policy(target):
 
 def plan(target):
     return ExecutionPlan(plan_id="plan-1", target_id=target.target_id, policy_id="policy-1",
-        rationale="Run one bounded HTTP probe.", steps=[ExecutionStep(step_id="probe", phase="reproduce",
+        rationale="Run one bounded HTTP probe.", input_fingerprints={"reproduction": "a" * 64, "compose": "b" * 64, "assets": "c" * 64}, steps=[ExecutionStep(step_id="probe", phase="reproduce",
             action="http", target_id=target.target_id, timeout_seconds=30, retries=1,
             rationale="Collect the target response.")])
 
