@@ -11,3 +11,4 @@ class PipelineState(TypedDict, total=False):
     status: str
     engine: dict
     poc_execution: dict
+    deployment_ready: bool
