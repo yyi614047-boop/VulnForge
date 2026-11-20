@@ -98,7 +98,8 @@ def test_pipeline_executes_domain_plan_with_policy_and_independent_verifier(tmp_
     assert "pull" in lab.actions and "up" in lab.actions and "down" in lab.actions
     assert observations == ["health", "reproduce", "verify"]
     saved = json.loads(report_path.read_text(encoding="utf-8"))
-    assert saved["domain_plan"]["target_id"] == spec.id
+    assert saved["plan"]["target_id"] == spec.id
+    assert saved["plan"]["input_fingerprints"]["reproduction"] == spec.fingerprint()
 
 
 def test_pipeline_fails_closed_without_policy_before_environment_side_effects(tmp_path):
