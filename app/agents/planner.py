@@ -33,7 +33,8 @@ def lifecycle(bundle: dict, keep: bool) -> list[tuple[str, str, str | None]]:
 
 def validate_execution_plan(raw, bundle: dict, target: TargetSpec,
                             spec: ReproductionSpec, policy: ExecutionPolicy,
-                            *, retries: int, timeout: int, keep: bool,\n                            poc_selection: dict | None = None) -> ExecutionPlan:
+                            *, retries: int, timeout: int, keep: bool,
+                            poc_selection: dict | None = None) -> ExecutionPlan:
     """Validate planner output against trusted lifecycle, provenance and policy."""
     plan = ExecutionPlan.model_validate(raw.model_dump(mode="json") if hasattr(raw, "model_dump") else raw)
     if plan.target_id != target.target_id or plan.policy_id != policy.policy_id:
