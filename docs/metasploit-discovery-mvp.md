@@ -93,3 +93,39 @@ This is intentionally conservative. Metasploit module rank is not target compati
 - Implemented: per-candidate explanations, matched/unknown/mismatch signals, and next-step guidance.
 - Implemented: CLI assessment against a reviewed reproduction spec.
 - Not implemented: fuzzy product/version matching, target fingerprinting, automated option population, module Check, exploit execution, or LangGraph routing.
+
+## Option Preparation MVP
+
+Prepare the first Metasploit candidate's target-bound options without executing the module:
+
+```bash
+vulnforge --action metasploit-prepare CVE-2021-44228-log4j \
+  --target-host 127.0.0.1
+```
+
+The command uses the reproduction spec's reviewed service port by default. Override it only when the lab's actual reachable port differs:
+
+```bash
+vulnforge --action metasploit-prepare CVE-2021-44228-log4j \
+  --target-host 127.0.0.1 --target-port 8080
+```
+
+The command searches the CVE, inspects the first result (default candidate limit is one), preserves declared module defaults, fills declared `RHOSTS`/`RHOST` and `RPORT`/`RPORTS` from the explicit target host/port, and reports missing required options. Optional non-target values can be supplied through the Python API's `overrides` argument, but only for options declared by the module. Target host/port fields cannot be overridden.
+
+Python API:
+
+```python
+from app.integrations.metasploit import prepare_module_options
+
+prepared = prepare_module_options(
+    candidate,
+    metadata,
+    target_host="127.0.0.1",
+    target_port=8080,
+)
+print(prepared.model_dump(mode="json"))
+```
+
+The result includes `ready`, `options`, `missing_required`, and `notes`. `ready=True` means only that required options are populated; it is not an exploitability verdict or execution authorization.
+
+This MVP requires an explicit reachable target host. It does not guess container IPs, start labs, call Module Check, execute an exploit, create sessions, or verify a vulnerability. A future integration can resolve the target endpoint from the Docker lab runtime and pass it to this pure preparation function.
