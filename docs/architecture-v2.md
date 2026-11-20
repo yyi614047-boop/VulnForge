@@ -1,7 +1,7 @@
 # VulnForge Architecture v2
 
 > Product direction: **Agent-driven Vulnerability Reproduction Platform**.
-> Implementation status: the core LangGraph reproduction path and canonical execution-plan migration exist; Read-only Metasploit CVE discovery and module inspection plus opt-in Researcher/Planner candidate selection are implemented on this branch; RPC execution and container egress isolation remain pending.
+> Implementation status: the core LangGraph reproduction path, Metasploit discovery/inspection, Researcher/Planner candidate selection, target-bound execution contracts, policy-gated RPC adapter, and opt-in StepExecutor integration are implemented on stacked feature branches. Live Metasploit daemon interoperability and container egress isolation remain pending.
 
 > PoC scope: discover, inspect, select, validate, execute, and verify **existing** PoCs and exploit modules. Autonomous PoC authoring is out of scope.
 
@@ -150,10 +150,10 @@ Models should be introduced only when a real cross-module contract needs them. D
 
 ## 7. PoC discovery and backend integration
 
-Metasploit is the **primary PoC source**; read-only CVE discovery and module inspection are implemented, while execution backend integration remains planned. It is not a separate Agent and it is not the whole application. Search results are candidates, not proof of compatibility or authorization.
+Metasploit is the **primary PoC source and V1 execution backend**; discovery, inspection, policy-gated RPC check/execute, and opt-in run integration are implemented on the feature stack. It is not a separate Agent and it is not the whole application. It is not a separate Agent and it is not the whole application. Search results are candidates, not proof of compatibility or authorization.
 
 Discovery priority:
-1. Metasploit Framework: search CVE references; inspect module identity, type, description, supported targets, product/version constraints, options, check support, payload/session requirements, side effects, and provenance.
+1. Metasploit Framework: search CVE references; inspect module identity, metadata references, options, and available Check behavior; use existing modules directly rather than generating or rewriting PoCs.
 2. GitHub, Exploit-DB, and upstream project repositories: find existing standalone PoCs when no suitable Metasploit module exists.
 3. Vulhub: primarily identify a compatible local vulnerable environment and its version/configuration/reproduction documentation; use bundled native PoCs when present.
 
@@ -193,7 +193,7 @@ Do not delete target assets, scripts, Compose files, or configuration merely bec
 
 ## 10. Product direction and implementation sequence
 
-Product identity: **Agent-driven Vulnerability Reproduction Platform**. Metasploit is the primary PoC source and planned exploit execution backend; GitHub/Exploit-DB/upstream repositories are secondary PoC sources; Vulhub is primarily the vulnerable-environment source. PoC generation is out of scope.
+Product identity: **Agent-driven Vulnerability Reproduction Platform**. Metasploit is the primary PoC source and V1 exploit execution backend; GitHub/Exploit-DB/upstream repositories are secondary PoC sources; Vulhub is primarily the vulnerable-environment source. PoC generation is out of scope.
 
 1. Keep the canonical `ExecutionPlan`, `ExecutionPolicy`, and LangGraph path stable.
 2. Define `PoCCandidate` and `PoCExecutionSpec` against real Metasploit and standalone-PoC requirements.
@@ -226,7 +226,7 @@ Do not make Metasploit a mandatory runtime dependency until its adapter and secu
 
 - Finish the last import/dead-code audit and retain only thin compatibility wrappers for the old `app.lab` and `app.tools` paths.
 - Add container egress isolation so `network_scope` constrains Docker pull/build and container traffic, not only loopback HTTP probes.
-- Decide whether Metasploit is an optional check provider or corroborating verifier; do not make it mandatory before the safety contract is defined.
+- Metasploit is the primary V1 existing-PoC execution backend; its own Check result is not the final reproduction verdict. The independent Verifier remains authoritative.
 - Run a real Docker-backed reproduction through deployment, verification, and cleanup; the repository currently contains no reviewed reproduction YAML fixture, and the fake-Docker Pipeline test is not a substitute for this.
 
  
