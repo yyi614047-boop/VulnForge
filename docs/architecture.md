@@ -10,11 +10,11 @@ flowchart TD
     B --> C[Planner]
     C --> D[Plan Validator]
     D --> E[Deployer]
-    E --> F[Reproducer]
-    F --> R[Bounded Recovery Gate]
-    R -->|approved retry| F
-    R -->|abort / exhausted| G[Independent Verifier]
-    F -->|phase complete| G
+    E --> F[Reproducer / StepExecutor]
+    F -->|phase complete| G[Independent Verifier]
+    F -. retryable failure .-> R{RecoveryController inside Executor}
+    R -->|retry same step, if approved| F
+    R -->|abort / budget exhausted| G
     G --> H[Cleanup and Report]
     B -->|missing / conflicting sources| H
     C -->|invalid plan| H
@@ -26,7 +26,7 @@ flowchart TD
 3. **Plan Validator** verifies schema, card/source hashes, action sequence, citations, dependencies, retry safety, and execution budgets. The model cannot add tools or change verification assertions.
 4. **Deployer** checks the Docker engine and starts the isolated Compose environment.
 5. **Reproducer** executes the plan's declared HTTP requests and scripts through the custom StepExecutor.
-6. **Bounded Recovery** handles typed transient `StepFailure` results. Planned retries happen first; after those are exhausted, the Recovery Agent may request one additional attempt of the exact same step. Python enforces retryability and the recovery budget. Model errors fail closed. The agent cannot replan or select another tool yet.
+6. **Bounded Recovery** handles typed transient `StepFailure` results. Planned retries happen first; after those are exhausted, the Recovery Agent may request the single additional retry available to the entire Pipeline run. Python enforces retryability and the global recovery budget. Model errors fail closed. The agent cannot replan or select another tool yet.
 7. **Verifier** independently checks response content, target-file evidence, and logs against the reviewed card.
 8. **Cleanup** releases resources, records cleanup status, and writes the final JSON report.
 
@@ -51,7 +51,7 @@ flowchart TD
 - The Verifier does not accept a zero exit code or HTTP status alone as proof.
 - Missing, truncated, or ambiguous evidence remains inconclusive.
 - Cleanup is attempted after failures and interruptions.
-- Recovery can only retry an explicitly retryable operation within a fixed budget; it cannot expand the validated plan.
+- Recovery can only retry an explicitly retryable operation once per Pipeline run; it cannot expand the validated plan.
 
 ## Knowledge layout
 

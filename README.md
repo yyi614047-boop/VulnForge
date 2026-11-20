@@ -13,8 +13,9 @@ The only primary execution architecture is the staged Pipeline:
 3. **Plan validation** binds the plan to the trusted card, source hashes, allowed actions, dependencies, and execution budgets.
 4. **Deployer** prepares and starts the Docker environment.
 5. **Reproducer** executes the reviewed HTTP requests and scripts in the plan.
-6. **Verifier** independently evaluates response, file, and log evidence.
-7. **Cleanup** removes lab resources and writes an auditable report.
+6. **Bounded Recovery** may ask the Recovery Agent for one additional retry of the exact same step after a typed transient failure. The retry budget is global to one Pipeline run.
+7. **Verifier** independently evaluates response, file, and log evidence.
+8. **Cleanup** removes lab resources and writes an auditable report.
 
 LangGraph owns the StateGraph, node scheduling, state transitions, and conditional routing. There is no second source-driven agent loop.
 
@@ -79,7 +80,7 @@ Use `--knowledge` to point to a directory containing reviewed executable cards. 
 - Docker and HTTP operations are bounded and constrained to the local lab.
 - A separate Verifier evaluates observed evidence; the Planner and Reproducer cannot declare success.
 - Cleanup is part of the Pipeline lifecycle.
-- Recovery currently supports only retrying the exact same policy-approved transient step or aborting. It cannot change tools, targets, commands, plans, or verification criteria.
+- Recovery currently supports only retrying the exact same policy-approved transient step or aborting, with at most one Agent-approved retry across the entire Pipeline run. It cannot change tools, targets, commands, plans, or verification criteria.
 
 ## Development
 
