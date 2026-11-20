@@ -1,35 +1,42 @@
 # VulnForge code-reading guide
 
-Read the project in the same order as one Pipeline run.
+Read the project in the same order as one authorized reproduction run.
 
-## 1. Start with role instructions
+## 1. Product boundary and domain contracts
 
-Read `app/agents/roles/researcher.md` and `app/agents/roles/planner.md`. These Markdown files define responsibilities and constraints supplied to the model. They are guidance, not the enforcement boundary.
+Start with `README.md` and `docs/architecture-v2.md`. Then read:
+
+- `app/domain/requests.py`
+- `app/domain/targets.py`
+- `app/domain/reproduction.py`
+- `app/domain/plans.py`
+- `app/domain/policies.py`
+- `app/domain/results.py`
+
+These define the shared data contracts. Target descriptions and discovered PoCs are not execution authorization; the reviewed policy is the permission boundary.
 
 ## 2. Follow the runtime
 
-Start at `app/lab/cli.py`, then read `app/lab/pipeline.py`. The Pipeline builds the LangGraph StateGraph and defines the Researcher, Planner, Deployer, Reproducer, Verifier, and Cleanup nodes.
+Start at `app/cli.py`, then `app/workflows/reproduction/graph.py` and `app/workflows/reproduction/state.py`. LangGraph owns orchestration, state transitions, and conditional routing.
 
-## 3. Understand research and planning
+## 3. Understand discovery and planning
 
-Read `app/lab/research.py`, `app/lab/planning.py`, and `app/lab/knowledge.py`. Researcher reads only declared source files. StructuredPlanner creates a typed plan. The validator binds the plan to the trusted card, hashes, citations, and lifecycle.
+Read `app/agents/researcher.py`, `app/agents/planner.py`, and their Markdown role instructions. Researcher gathers source-backed target facts; Planner selects from existing reproduction material and emits the canonical `ExecutionPlan`.
 
-## 4. Understand side effects
+Metasploit-first discovery and its controlled RPC adapter are planned integrations, not current completed features.
 
-Read `app/lab/step_executor.py`, `app/lab/recovery_controller.py`, `app/agents/roles/recovery.md`, `app/tools/docker_lab.py`, `app/tools/docker_engine.py`, `app/tools/registry.py`, and `app/lab/http.py`. The Recovery Agent can recommend only retry or abort; the executor enforces retryability and a one additional retry across the entire Pipeline run.
+## 4. Understand policy and side effects
 
-## 5. Understand state and model context
+Read `app/execution/executor.py`, `app/execution/recovery.py`, `app/agents/recovery.py`, `app/environments/docker/manager.py`, `app/environments/docker/network.py`, and `app/tools/dispatcher.py`. Deterministic policy validation controls what the Executor may do.
 
-Read `app/agent_context.py` for node state boundaries and per-agent invocation context. Read `app/trace.py` for model/tool trace recording.
+## 5. Understand evidence and verification
 
-## 6. Optional Pipeline extensions
+Read `app/execution/verifier.py` and `app/execution/artifacts.py`. The Verifier evaluates collected evidence independently; an Agent or backend success message is not sufficient proof.
 
-Explore `authoring.py`, `environment_authoring.py`, `recovery.py`, `comparison.py`, and `batch.py`. These reuse the staged Pipeline; they do not introduce another primary runtime.
-
-## 7. Run tests
+## 6. Run tests
 
 ```bash
 python -m pytest -q
 ```
 
-Tests do not replace validation against real Docker environments and actual vulnerable software versions.
+Unit tests do not replace real Docker-backed reproduction, Metasploit integration, or security-isolation testing.
