@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 
 from app.lab.knowledge import Card
-from app.rag.providers import configured_model
+from app.lab.model_provider import configured_model
 
 
 def extract(root, output, model, limit=0):
