@@ -28,9 +28,11 @@ python -m app.lab.cli run CVE-2021-25646 --timeout 300 --report reports/druid-00
 A bare CVE identifier starts a complete experiment. The source planner reads
 `knowledge/vulhub/<product>/<environment>/docker-compose.yml` and its Markdown
 files. The LLM is used only to translate those documented steps into a
-schema-validated plan with exact source quotes. The runner snapshots the
-environment into `.labs`, binds published ports to loopback, and executes the
-plan in order without an LLM feedback loop. Verification searches Metasploit
+schema-validated plan with exact source quotes. A compact LangGraph
+Plan-Act-Observe-Decide loop executes the plan: deterministic nodes run each
+documented operation, record evidence, and continue or abort under a fixed
+policy. The LLM is not called for runtime decisions or recovery. The runner
+snapshots the environment into `.labs` and binds published ports to loopback. Verification searches Metasploit
 for modules tagged with the CVE and invokes each module's native `check`
 method (the first implementation does not execute exploit payloads). No
 matching module, unsupported checks, and ambiguous outcomes are reported as
