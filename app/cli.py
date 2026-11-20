@@ -15,6 +15,7 @@ from app.workflows.reproduction.graph import Pipeline
 from app.agents.planner import StructuredPlanner
 from app.agents.researcher import Researcher
 from app.environments.docker.engine import DockerEngine
+from app.execution.metasploit_rpc import MetasploitRpcAdapter, MetasploitRpcClient
 
 
 def _parser():
@@ -29,6 +30,7 @@ def _parser():
     parser.add_argument("--msfconsole", default="msfconsole", help="Path to the msfconsole executable")
     parser.add_argument("--msf-timeout", type=int, default=180, choices=range(1, 901), metavar="SECONDS")
     parser.add_argument("--discover-metasploit", action="store_true", help="Include read-only Metasploit candidates during research/planning")
+    parser.add_argument("--enable-metasploit-execution", action="store_true", help="Enable policy-gated Metasploit Check/Execute against the approved loopback lab target")
     parser.add_argument("--environment", help="Relative target directory for target-inspect")
     parser.add_argument("--request-file", type=Path, help="JSON ReproductionRequest for request-validate")
     parser.add_argument("--policy-file", type=Path, help="Reviewed JSON ExecutionPolicy required for run")
@@ -149,6 +151,8 @@ def main():
         return
     if not args.identifier:
         parser.error("provide a reviewed reproduction-spec identifier")
+    if args.enable_metasploit_execution and not args.discover_metasploit:
+        parser.error("--enable-metasploit-execution requires --discover-metasploit")
     if args.action in {"plan", "run"} and not args.policy_file:
         parser.error(f"--action {args.action} requires --policy-file; generate a reviewed template with --action policy-preview")
     try:
@@ -172,12 +176,14 @@ def main():
             return
         project = args.project or f"lab-{uuid4().hex[:12]}"
         report_path = args.report or Path("reports") / f"{project}.json"
+        metasploit_adapter = MetasploitRpcAdapter(MetasploitRpcClient.from_env()) if args.enable_metasploit_execution else None
         pipeline = Pipeline(
             args.specs, args.workspace, project, llm=model,
             retries=args.retries, timeout=args.timeout, keep=args.keep,
             docker_engine=DockerEngine(), engine_timeout=args.engine_timeout,
             execution_policy=policy,
             poc_discovery=MetasploitDiscovery(executable=args.msfconsole, timeout=args.msf_timeout) if args.discover_metasploit else None,
+            metasploit_adapter=metasploit_adapter,
         )
         report = pipeline.run(args.identifier, report_path)
         print(json.dumps({
