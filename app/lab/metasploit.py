@@ -106,11 +106,13 @@ class MetasploitRunner:
             modules = self.discover(cve)
         except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
             return {"cve": cve.upper(), "status": "inconclusive",
-                    "reason": f"Metasploit module discovery failed: {exc}", "modules": []}
+                    "reason": f"Metasploit module discovery failed: {exc}", "modules": [],
+                    "verification_type": "native_check_only", "exploit_payload_executed": False}
         if not modules:
             return {"cve": cve.upper(), "status": "unsupported",
                     "reason": "No Metasploit exploit or auxiliary module matched this CVE",
-                    "modules": []}
+                    "modules": [], "verification_type": "native_check_only",
+                    "exploit_payload_executed": False}
 
         results = []
         for module in modules:
