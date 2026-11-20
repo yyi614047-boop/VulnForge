@@ -67,7 +67,6 @@ python -m app.lab.cli --action engine --check-only
 python -m app.lab.cli CVE-2021-25646 --action research
 python -m app.lab.cli CVE-2021-25646 --action plan
 python -m app.lab.cli CVE-2021-25646 --action run
-python -m app.lab.cli CVE-2021-25646 --engine sequential
 ```
 
 Use `--knowledge` to point to a directory containing reviewed executable cards. Use a new report path for each run. The default report location is `reports/<project>.json`.
