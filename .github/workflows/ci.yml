@@ -22,3 +22,7 @@ jobs:
         run: python -m pip install -e ".[dev]"
       - name: Run unit tests
         run: python -m pytest -q
+      - name: Verify real Docker internal-network isolation
+        run: python -m pytest -q tests/test_docker_isolation_integration.py
+        env:
+          VULNFORGE_DOCKER_INTEGRATION: "1"
