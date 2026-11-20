@@ -1,19 +1,21 @@
-# VulnForge Architecture v2 (Draft)
+# VulnForge Architecture v2
 
-> Status: active target architecture; implementation is in progress. Completed and pending migration slices are tracked below.
-> Runtime: LangGraph. Model integration: LangChain + OpenAI API. Metasploit integration: undecided; see Verification.
+> Product direction: **Agent-driven Vulnerability Reproduction Platform**.
+> Implementation status: the core LangGraph reproduction path and canonical execution-plan migration exist; Metasploit-first discovery/execution and container egress isolation are planned integrations, not completed capabilities.
+
+> PoC scope: discover, inspect, select, validate, execute, and verify **existing** PoCs and exploit modules. Autonomous PoC authoring is out of scope.
 
 ## 1. Product boundary
 
-VulnForge is an agent-assisted vulnerability reproduction and verification framework.
+VulnForge is an Agent-driven vulnerability reproduction platform. Given a CVE or approved target request, it discovers existing PoCs and exploit modules, assesses their provenance and compatibility, prepares a matching vulnerable environment, executes an explicitly authorized candidate, independently verifies the result, and produces an auditable report.
 
-It accepts a reproduction request, researches the target, produces a constrained execution plan, provisions an isolated environment, executes approved actions, gathers evidence, verifies the result, and cleans up.
+The product goal is automated vulnerability reproduction. The engineering foundation is a policy-enforced Agent workflow with deterministic execution, bounded recovery, and evidence-based verification. VulnForge does not generate PoC code from scratch.
 
 The system supports both:
 - Dynamic research from a CVE identifier, repository URL, or vulnerability description.
 - A user-supplied target specification for reproducible, controlled runs.
 
-The upstream Vulhub repository is retained under `targets/vulhub/` as target material, not treated as a KnowledgeBase or RAG corpus.
+The upstream Vulhub repository is retained under `targets/vulhub/` primarily as vulnerable-environment material and reproduction documentation, not as a KnowledgeBase or RAG corpus. Vulhub entries may include native PoCs, but Vulhub is not assumed to provide a PoC for every CVE.
 
 ## 2. Architecture principles
 
@@ -126,7 +128,9 @@ Initial shared contracts:
 - `ReproductionRequest`: user intent, CVE/repository/description, optional supplied target specification.
 - `TargetSpec`: target identity, source references, version, environment inputs, and reproduction entry points. It is a target description, not a permission grant.
 - `ExecutionPolicy`: trusted allowlist of targets, tools/actions, network scope, resource limits, timeouts, and retry budget.
-- `ExecutionPlan`: ordered steps, dependencies, expected observations, and verification intent.
+- `PoCCandidate` (planned): source, candidate/module/script identity, CVE references, type, version constraints, required options, capabilities, and provenance.
+- `PoCExecutionSpec` (planned): selected candidate, backend, approved parameters, execution mode, and expected outputs.
+- `ExecutionPlan`: ordered steps, dependencies, selected candidate/backend, target binding, expected observations, and verification intent.
 - `ExecutionStep`: typed action and validated parameters.
 - `ExecutionResult`: status, timestamps, output references, and failure classification.
 - `Evidence`: provenance, collection method, content/reference, and integrity metadata.
@@ -143,27 +147,24 @@ Models should be introduced only when a real cross-module contract needs them. D
 4. Python validates plan schema, target binding, policy, dependencies, budgets, and permitted tools.
 5. LangGraph drives deployment and reproduction; Executor executes one validated step at a time.
 6. Collect observations and evidence.
-7. On failure, Recovery may propose a bounded action. Retry repeats an approved step; Replan creates a new plan that must pass validation; Switch Tool selects only from policy-approved alternatives; Abort stops execution.
+7. On failure, Recovery may propose a bounded action. Retry repeats an approved step; Replan creates a new plan that must pass validation; Switch Backend selects only from pre-approved compatible PoC candidates/backends; Abort stops execution.
 8. Verification evaluates evidence independently of the Planner's claims.
 9. Cleanup runs on success, failure, and cancellation; report is finalized.
 
-## 7. Verification design — decision required
+## 7. PoC discovery and backend integration
 
-Do not hard-code Metasploit as the sole verifier yet.
+Metasploit is the **primary PoC source and planned execution backend**. It is not a separate Agent and it is not the whole application. Search results are candidates, not proof of compatibility or authorization.
 
-Keep verification behind a stable interface that can accept evidence from:
-- deterministic HTTP/file/log assertions;
-- target-specific verification scripts;
-- optional external verification adapters, potentially Metasploit.
+Discovery priority:
+1. Metasploit Framework: search CVE references; inspect module identity, type, description, supported targets, product/version constraints, options, check support, payload/session requirements, side effects, and provenance.
+2. GitHub, Exploit-DB, and upstream project repositories: find existing standalone PoCs when no suitable Metasploit module exists.
+3. Vulhub: primarily identify a compatible local vulnerable environment and its version/configuration/reproduction documentation; use bundled native PoCs when present.
 
-Before implementing a Metasploit adapter, decide:
-- whether it is a primary verifier, an optional exploit/check provider, or a corroborating evidence source;
-- how module selection and version compatibility are controlled;
-- whether only `check` is allowed by default and under what explicit authorization `run` may be used;
-- how target scope, payloads, sessions, timeouts, and cleanup are constrained;
-- how Metasploit results combine with independent evidence and how inconclusive results are reported.
+A Metasploit module mentioning a CVE does not prove that it affects the selected version or can reproduce the issue in the selected environment. Missing modules, unsupported targets, missing options, and inconclusive checks must be reported honestly. Do not invent parameters or treat a search hit as proof of exploitability.
 
-Until that decision is made, keep the verifier interface provider-neutral and do not add a mandatory Metasploit dependency.
+Keep verification provider-neutral. A module's own success message or session creation is not, by itself, sufficient proof; the Verifier must independently assess target-specific HTTP, file, log, or other evidence.
+
+The planned Metasploit integration should use a controlled API such as msfrpcd/RPC. Start with read-only search and module inspection, then add policy-gated `check` and explicitly approved exploit execution. Do not expose unrestricted msfconsole commands to the Agent. Payloads, sessions, credentials, timeouts, side effects, and cleanup require explicit controls.
 
 ## 8. Legacy migration map
 
@@ -193,17 +194,22 @@ Completed: preserve the upstream Vulhub tree and license under `targets/vulhub/`
 
 Do not delete target assets, scripts, Compose files, or configuration merely because they currently live under a directory named `knowledge`.
 
-## 10. Migration sequence and acceptance criteria
+## 10. Product direction and implementation sequence
 
-1. Finalize this architecture and dependency boundaries.
-2. Inventory imports, entry points, tests, and data dependencies; remove confirmed dead code.
-3. Move modules incrementally, keeping compatibility only where needed and updating imports in the same commit.
-4. Run unit tests after each migration slice; preserve a working CLI and one end-to-end reproduction path.
-5. Confirm verification design, then implement provider-neutral verifier and any approved Metasploit adapter.
-6. Expand bounded recovery and security tests.
-7. Run unit, integration, and security suites; update docs; only then consider merging to main.
+Product identity: **Agent-driven Vulnerability Reproduction Platform**. Metasploit is the primary PoC source and planned exploit execution backend; GitHub/Exploit-DB/upstream repositories are secondary PoC sources; Vulhub is primarily the vulnerable-environment source. PoC generation is out of scope.
 
-No mass deletion or main-branch merge should happen before the relevant migration slice passes its tests.
+1. Keep the canonical `ExecutionPlan`, `ExecutionPolicy`, and LangGraph path stable.
+2. Define `PoCCandidate` and `PoCExecutionSpec` against real Metasploit and standalone-PoC requirements.
+3. Implement Metasploit CVE/module discovery and read-only metadata/options inspection first.
+4. Add policy-bound Metasploit `check` support where available; document module-specific side effects and limitations.
+5. Add controlled RPC exploit execution with explicit approval, isolated target binding, timeout, output capture, and session cleanup.
+6. Add secondary existing-PoC sources and a constrained standalone script adapter.
+7. Keep Vulhub environment selection independent from PoC source selection; connect candidates to compatible local targets.
+8. Add container egress isolation, safe backend switching, and independent evidence checks.
+9. Build a CVE reproduction benchmark covering discovery coverage, candidate compatibility, reproduction success, false-positive rate, execution time, and cleanup reliability.
+10. Run unit, integration, Docker-backed, and security suites before merging.
+
+Do not make Metasploit a mandatory runtime dependency until its adapter and security boundary are implemented and tested. No mass deletion or main-branch merge should happen before the relevant migration slice passes its tests.
 
 
 ## 11. Implementation ledger
@@ -248,3 +254,14 @@ No mass deletion or main-branch merge should happen before the relevant migratio
 - Recovery retries now require the action to be explicitly marked retryable in policy and remain within the policy recovery budget.
 - The provider-neutral `EvidenceVerifier` is wired into the execution verification phase for reviewed HTTP, file, and log assertions.
 - Policy-bound execution uses fixed target ports because automatic port rewriting would invalidate the approved fingerprint.
+
+
+## 12. Product decisions (2026-11-20)
+
+- Product goal: reliable automated reproduction of known vulnerabilities.
+- Primary PoC source/backend: Metasploit Framework.
+- Secondary PoC sources: GitHub, Exploit-DB, and upstream project repositories.
+- Primary vulnerable-environment source: Vulhub; native Vulhub PoCs are optional rather than assumed.
+- PoC authoring/generation: explicitly out of scope.
+- Separation of concerns: Researcher discovers and inspects; Planner selects and plans; deterministic policy authorizes; Executor invokes adapters; Verifier independently evaluates evidence; Recovery coordinates bounded retry/replan/backend-switch/abort.
+- Metasploit-first discovery and RPC execution are target capabilities, not yet implemented on this branch.
