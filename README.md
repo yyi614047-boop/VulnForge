@@ -6,7 +6,7 @@ The project uses Markdown role instructions, LangChain with the OpenAI API for m
 
 ## Product design and PoC sources
 
-- **Metasploit Framework — primary PoC source:** read-only CVE module discovery and module metadata inspection are implemented behind `MetasploitDiscovery`; controlled RPC execution remains planned.
+- **Metasploit Framework — primary PoC source and V1 execution backend:** CVE discovery, module inspection, target-bound execution contracts, policy-gated MessagePack RPC check/execute, and opt-in LangGraph run integration are implemented. Live RPC interoperability still requires testing against an installed Metasploit daemon.
 - **GitHub / Exploit-DB / upstream repositories — secondary PoC sources:** find existing standalone scripts when no suitable Metasploit module exists.
 - **Vulhub — primary vulnerable-environment source:** provide Docker Compose environments, version/configuration context, and reproduction documentation. Some entries include native PoCs, but Vulhub is not assumed to provide one for every CVE.
 
@@ -20,7 +20,7 @@ The only primary execution architecture is the staged Pipeline:
 2. **Planner** receives the research bundle and Markdown evidence, then returns a typed domain `ExecutionPlan`.
 3. **Plan validation** binds the plan to the trusted reproduction specification, source hashes, allowed actions, dependencies, and execution budgets.
 4. **Deployer** prepares and starts the Docker environment.
-5. **Reproducer** executes the approved existing PoC through its backend adapter. Metasploit discovery/inspection exists as a separate read-only capability; Metasploit RPC exploit execution is not yet connected to this path.
+5. **Reproducer** executes the selected existing Metasploit module through the policy-gated RPC adapter when explicitly enabled; the independent Verifier still determines whether reproduction succeeded.
 6. **Bounded Recovery** may ask the Recovery Agent for one additional retry of the exact same step after a typed transient failure. The retry budget is global to one Pipeline run.
 7. **Verifier** independently evaluates response, file, and log evidence.
 8. **Cleanup** removes lab resources and writes an auditable report.
@@ -43,7 +43,7 @@ LangGraph owns the StateGraph, node scheduling, state transitions, and condition
 
 RAG, BM25, embedding indexes, the experimental source-driven runner, and the duplicate legacy workflow have been removed. The project does not use Claude Code or Claude Agent SDK.
 
-### Metasploit discovery (implemented; read-only)
+### Metasploit discovery and RPC execution
 
 Install Metasploit Framework and make `msfconsole` available on `PATH`, then run:
 
@@ -52,7 +52,7 @@ python -m app.cli --action metasploit-search --cve CVE-2021-44228
 python -m app.cli --action metasploit-inspect --cve CVE-2021-44228 --module exploit/multi/http/log4shell_header_injection
 ```
 
-The search action returns candidate module paths. Inspection returns a typed `PoCCandidate` with module identity, parsed metadata, references, targets, options where the console output exposes them, and a SHA-256 digest of the raw metadata excerpt. The integration uses `msfconsole` with argument arrays and `shell=False`. It does not invoke `check`, `exploit`, payloads, or sessions. Metadata parsing is best-effort; the raw excerpt is retained so fields that cannot be parsed are not silently fabricated.
+The search action returns candidate module paths. Inspection returns a typed `PoCCandidate` with module identity, parsed metadata, references, targets, options where the console output exposes them, and a SHA-256 digest of the raw metadata excerpt. The discovery path uses `msfconsole` with argument arrays and `shell=False`. The separate RPC adapter uses MessagePack, a loopback-only endpoint, exact candidate/target fingerprints, explicit policy approvals, a Check-first flow, bounded job polling, and scoped session cleanup. Metadata parsing is best-effort; the raw excerpt is retained so fields that cannot be parsed are not silently fabricated. CI uses a fake RPC client; live daemon/module execution has not yet been tested.
 
 To opt in to candidate discovery during Researcher/Planner runs, add `--discover-metasploit` to `research`, `plan`, or `run`. The Planner may nominate one inspected exploit module for human review. Candidate metadata is fingerprinted into the ExecutionPlan. For the `run` action only, `--execute-metasploit` enables the policy-gated RPC check/execute path; see `docs/metasploit-integration.md` for required local RPC configuration and approvals.
 
