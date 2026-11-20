@@ -1,6 +1,6 @@
 # Metasploit and Docker Deployment Architecture
 
-> Status: **design proposal**. This document records the intended deployment boundary for the planned Metasploit integration. It does not claim that the Metasploit RPC adapter, Docker network isolation, or production deployment has already been implemented.
+> Status: **partially implemented**. The read-only RPC Discovery and Target Compatibility MVPs exist. The container deployment boundary, Docker network isolation, Check/Exploit integration, and production deployment remain design proposals or future work.
 
 ## 1. Decision
 
