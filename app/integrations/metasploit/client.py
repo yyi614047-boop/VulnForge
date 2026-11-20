@@ -95,7 +95,8 @@ class MetasploitRPCClient:
         if module_type not in {"exploit", "auxiliary"}:
             raise ValueError("Module check supports exploit and auxiliary modules only")
         if not isinstance(options, dict) or any(
-            not isinstance(key, str) or not key or isinstance(value, (dict, list, tuple, set))
+            not isinstance(key, str) or not key
+            or not isinstance(value, (str, int, float, bool, type(None)))
             for key, value in options.items()
         ):
             raise ValueError("Module options must be a flat scalar mapping")
