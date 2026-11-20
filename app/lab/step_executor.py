@@ -13,7 +13,7 @@ from threading import Event
 from app.lab.http import request, verify
 from app.lab.knowledge import Card, KnowledgeBase
 from app.lab.planning import DeploymentPlan, Step, validate_deployment_plan
-from app.rag.index import digest
+from app.lab.hashing import digest
 from app.tools.docker_lab import DockerLab, DockerLabParams, load_compose
 from app.tools.registry import ToolTimeoutError
 from app.tools.files import WorkspaceFiles, WriteParams, local_path, file_hash
