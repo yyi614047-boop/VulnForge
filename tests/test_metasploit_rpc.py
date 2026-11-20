@@ -96,7 +96,7 @@ def test_rpc_client_authenticates_once_and_attaches_token():
     ]
 
 
-def test_rpc_client_rejects_invalid_method_and_auth_failure():
+def test_rpc_client_rejects_unapproved_rpc_method():
     transport = FakeRpcTransport([("auth.login", {"result": "failure"})])
     client = MetasploitRpcClient(transport, username="user", password="pass")
     try:
