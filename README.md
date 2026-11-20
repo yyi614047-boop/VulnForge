@@ -1,12 +1,15 @@
 # Agent Vulnerability Reproduction Workflow
 
-A local Docker lab workflow with persistent retrieval, validated plans, script
-execution, independent evidence checks, bounded recovery and durable reports.
-The CLI reads local Vulhub environments and uses separate knowledge cards for evaluation.
+A local Docker lab workflow for authorized vulnerability reproduction. Vulhub
+Markdown and Docker Compose remain the primary inputs. An LLM translates the
+documented procedure into a schema-validated execution plan; runtime execution
+is deterministic, and vulnerability checks use native Metasploit modules.
+Evaluation cards and LLM-based runtime decisions are not used by the primary CLI.
 
 ## Install and test
 
-Python 3.11+, Docker Engine and Docker Compose v2 are required for real lab runs.
+Python 3.11+, Docker Engine, Docker Compose v2 and Metasploit Framework
+(`msfconsole` on PATH) are required for real lab runs.
 
 ```powershell
 python -m venv .venv
@@ -23,19 +26,19 @@ python -m app.lab.cli run CVE-2021-25646 --timeout 300 --report reports/druid-00
 ```
 
 A bare CVE identifier starts a complete experiment. The source planner reads
-`knowledge/vulhub/<product>/<environment>/docker-compose.yml` and its Markdown files.
-The runner snapshots the environment into `.labs` and binds published ports to
-loopback. A LangGraph agent/tool loop reads observations and chooses subsequent
-HTTP requests, container commands, source reads or log inspection. The agent's
-finish action submits the attempt for evaluation against the corresponding root
-YAML card. Missing evaluation evidence produces an `inconclusive` result.
-Execution and cleanup evidence are saved in the report.
+`knowledge/vulhub/<product>/<environment>/docker-compose.yml` and its Markdown
+files. The LLM is used only to translate those documented steps into a
+schema-validated plan with exact source quotes. The runner snapshots the
+environment into `.labs`, binds published ports to loopback, and executes the
+plan in order without an LLM feedback loop. Verification searches Metasploit
+for modules tagged with the CVE and invokes each module's native `check`
+method. No matching module, unsupported checks, and ambiguous outcomes are
+reported as `unsupported` or `inconclusive`, never as success. Execution,
+Metasploit output and cleanup evidence are saved in the report.
 
-Each report has a sibling `<report-stem>.trace.jsonl` containing timestamped,
-ordered model calls, tool inputs/results/errors, agent decisions and cleanup.
-Model responses include raw provider metadata when supplied. Events are flushed
-to disk as they occur. `--max-steps` limits agent decisions (default 30).
-`--engine sequential` runs the same decision/tool loop without LangGraph.
+Each report has a sibling `<report-stem>.trace.jsonl` containing timestamped
+model translation calls, deterministic step execution, Metasploit commands,
+tool results/errors and cleanup. Events are flushed to disk as they occur.
 
 ## Run a complete lab
 
@@ -62,10 +65,9 @@ python -m app.lab.cli CVE-2021-25646 --action research --model
 ```
 
 These search and research commands use `knowledge/vulhub/<product>/<environment>/`.
-The research model receives the environment's Compose and Markdown files, with
-source paths for citations. YAML evaluation cards are excluded from that input.
-`--model` enables model synthesis for research. Planning and running always use
-the source model. The source model supports `LLM_API_KEY`, `LLM_BASE_URL` and
+Research reads the source documents without an LLM. Planning and running use
+the source model only to translate Vulhub Markdown into structured steps. The
+source model supports `LLM_API_KEY`, `LLM_BASE_URL` and
 `LLM_MODEL` in the project `.env`, and their process environment equivalents.
 Process settings take precedence. `OPENAI_API_KEY`, `OPENAI_BASE_URL` and
 `PLANNER_MODEL` are also supported.
@@ -76,12 +78,13 @@ Process settings take precedence. `OPENAI_API_KEY`, `OPENAI_BASE_URL` and
 | `index`, `search`, `research` | Index and research local knowledge |
 | `plan`, `run`, `inspect` | Plan, execute and inspect a lab run |
 
-Model features require `OPENAI_API_KEY` and `PLANNER_MODEL`; optionally set
-`OPENAI_BASE_URL`. `--dense` additionally requires `RAG_EMBEDDING_MODEL`.
-The legacy embedding providers use process environment settings.
+`OPENAI_API_KEY` and `PLANNER_MODEL` are required only for Markdown-to-plan
+translation; optionally set `OPENAI_BASE_URL`. `--dense` additionally requires
+`RAG_EMBEDDING_MODEL`. The legacy embedding providers use process environment settings.
 
-The authoring, recovery, comparison, batch, case assistant and evaluation
-components remain available as Python APIs and integration examples.
+Legacy authoring, recovery, comparison, batch, case-assistant and evaluation
+components remain in the repository as separate APIs/examples; they are not
+part of the primary deterministic reproduction path.
 
 ## Documentation
 
