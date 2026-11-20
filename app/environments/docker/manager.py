@@ -397,8 +397,8 @@ class DockerLab:
             ).hexdigest()
             return {
                 "project": self.project, "service": service, "compose_sha256": compose_sha256,
-                "target_container_id": target["id"], "target_host": target["ip"],
-                "target_port": matches[0], "published_host_port": published_port,
+                "target_container_id": target["id"], "target_host": target["ip"], "host": target["ip"],
+                "target_port": matches[0], "port": matches[0], "published_host_port": published_port,
                 "network_name": network_name, "network_id": network_id, "network_internal": True,
                 "target_networks": [network_name], "metasploit_container_id": msf["id"],
                 "metasploit_host": msf["ip"], "metasploit_networks": [network_name],
