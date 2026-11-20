@@ -1,3 +1,7 @@
+# Experimental retrieval benchmark (not part of the main runtime)
+
+This document describes an isolated experiment for comparing BM25 and embedding-based retrieval. The production CLI and card-based Pipeline do not build or query these indexes. The experiment is optional and must be invoked through its dedicated script/module.
+
 # 本地 embedding 仿真实验
 
 本轮实验验证文档分块、真实模型向量生成、SQLite 入库、查询向量化、BM25 与向量检索融合及评测。默认使用 `BAAI/bge-small-zh-v1.5`，CPU 运行，不需要 API Key、GPU、Docker 或生成模型。尚未接入 reranker。本实验不执行漏洞复现容器，也不评测生成回答。
@@ -20,7 +24,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_embedding_expe
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_embedding_experiment.ps1
 ```
 
-后续运行使用 `local_files_only=True`，不再自动下载。脚本在运行期间设置本地模型配置，结束后恢复原有环境变量。直接调用 CLI 时仍需显式设置变量和 `--dense`，项目不会自动读取 `.env`。
+后续运行使用 `local_files_only=True`，不再自动下载。脚本在运行期间设置本地模型配置，结束后恢复原有环境变量。该实验不再通过主 CLI 的 `--dense` 参数启动，项目不会自动读取 `.env`。
 
 每轮使用独立的 `.labs/embedding-experiments/<run-id>/` 目录，包含 BM25 和混合检索两个 SQLite 索引及评测查询副本。文档中的长代码块可能超过模型输入上限，适配器按 token 窗口编码并平均归一化，避免直接截掉尾部。BGE 查询加中文检索指令，文档不加。
 
