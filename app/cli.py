@@ -1,10 +1,12 @@
 """Command-line entry point for the staged LangGraph vulnerability Pipeline."""
 import argparse
 import json
+import subprocess
 from pathlib import Path
 from uuid import uuid4
 
 from app.domain.requests import ReproductionRequest
+from app.discovery.metasploit import MetasploitDiscovery
 from app.domain.policies import ExecutionPolicy
 from app.targets.vulhub.catalog import TargetCatalog
 from app.targets.vulhub import VulhubTargetLoader
@@ -18,10 +20,14 @@ from app.environments.docker.engine import DockerEngine
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("identifier", nargs="?", help="Reviewed reproduction specification identifier")
-    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate", "policy-preview"], default="run")
+    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate", "policy-preview", "metasploit-search", "metasploit-inspect"], default="run")
     parser.add_argument("--targets", type=Path, default=Path("targets/vulhub"),
                         help="Root of the retained Vulhub target corpus")
     parser.add_argument("--query", help="Search query for target-search")
+    parser.add_argument("--cve", help="CVE identifier for Metasploit discovery/inspection")
+    parser.add_argument("--module", help="Metasploit module path for metasploit-inspect")
+    parser.add_argument("--msfconsole", default="msfconsole", help="Path to the msfconsole executable")
+    parser.add_argument("--msf-timeout", type=int, default=180, choices=range(1, 901), metavar="SECONDS")
     parser.add_argument("--environment", help="Relative target directory for target-inspect")
     parser.add_argument("--request-file", type=Path, help="JSON ReproductionRequest for request-validate")
     parser.add_argument("--policy-file", type=Path, help="Reviewed JSON ExecutionPolicy required for run")
@@ -59,6 +65,21 @@ def main():
             parser.error("--action target-inspect requires --environment")
         target = VulhubTargetLoader(args.targets).load(args.environment)
         print(json.dumps(target.model_dump(mode="json"), ensure_ascii=False, indent=2))
+        return
+    if args.action in {"metasploit-search", "metasploit-inspect"}:
+        if not args.cve:
+            parser.error(f"--action {args.action} requires --cve")
+        if args.action == "metasploit-inspect" and not args.module:
+            parser.error("--action metasploit-inspect requires --module")
+        try:
+            discovery = MetasploitDiscovery(executable=args.msfconsole, timeout=args.msf_timeout)
+            if args.action == "metasploit-search":
+                result = {"cve": args.cve.upper(), "modules": discovery.discover(args.cve)}
+            else:
+                result = discovery.inspect(args.cve, args.module).model_dump(mode="json")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+            parser.exit(2, f"Metasploit discovery failed: {exc}\\n")
         return
     if args.action == "request-validate":
         if not args.request_file:
