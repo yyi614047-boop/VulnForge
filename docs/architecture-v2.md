@@ -1,7 +1,7 @@
 # VulnForge Architecture v2
 
 > Product direction: **Agent-driven Vulnerability Reproduction Platform**.
-> Implementation status: the core LangGraph reproduction path and canonical execution-plan migration exist; Read-only Metasploit CVE discovery and module inspection are implemented on this branch; Planner integration, RPC execution, and container egress isolation remain pending.
+> Implementation status: the core LangGraph reproduction path and canonical execution-plan migration exist; Read-only Metasploit CVE discovery and module inspection plus opt-in Researcher/Planner candidate selection are implemented on this branch; RPC execution and container egress isolation remain pending.
 
 > PoC scope: discover, inspect, select, validate, execute, and verify **existing** PoCs and exploit modules. Autonomous PoC authoring is out of scope.
 
