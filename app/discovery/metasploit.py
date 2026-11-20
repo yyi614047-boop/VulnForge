@@ -71,10 +71,6 @@ def parse_module_info(module: str, cve: str, output: str) -> PoCCandidate:
     description_lines = _section_lines(output, "Description")
     description = "\n".join(description_lines).strip()
     references = list(dict.fromkeys(CVE_IN_OUTPUT.findall(output)))
-    if normalized_cve not in {item.upper() for item in references}:
-        # The search result itself is provenance for the query, not proof that
-        # module metadata independently references the CVE.
-        pass
 
     targets = []
     for line in _section_lines(output, "Targets"):
@@ -111,7 +107,8 @@ def parse_module_info(module: str, cve: str, output: str) -> PoCCandidate:
     return PoCCandidate(
         candidate_id=f"metasploit:{module}",
         source="metasploit",
-        cve_ids=[normalized_cve],
+        cve_ids=references,
+        discovery_query_cve=normalized_cve,
         module_type=module.split("/", 1)[0],
         module_path=module,
         name=name,
