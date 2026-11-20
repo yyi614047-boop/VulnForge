@@ -199,10 +199,16 @@ class StepExecutor:
                 return record
             target_port = next(iter(published_ports))
 
-        spec, assessment = build_poc_execution_spec(
-            candidate, self.target_spec, target_host="127.0.0.1",
-            target_port=target_port, supplied_options=self.metasploit_options,
-        )
+        try:
+            spec, assessment = build_poc_execution_spec(
+                candidate, self.target_spec, target_host="127.0.0.1",
+                target_port=target_port, supplied_options=self.metasploit_options,
+            )
+        except Exception as exc:
+            record = {"status": "preparation_failed", "candidate_id": candidate.candidate_id, "error": str(exc)}
+            self.report["metasploit"] = record
+            self.save()
+            return record
         record = {
             "status": "checking",
             "candidate_id": candidate.candidate_id,
@@ -432,6 +438,13 @@ class StepExecutor:
                 probes = list(self.card.reproduction)
                 result = verify(probes, self.observations, self.logs) if probes else {
                     "status": "inconclusive", "checks": [], "reason": "No independent verification assertions were declared"}
+            metasploit = self.report.get("metasploit", {})
+            if self.domain_plan.selected_poc_candidate_id and metasploit.get("status") != "executed":
+                if metasploit.get("status") in {"check_safe", "check_not_vulnerable"}:
+                    result["status"] = "not_reproduced"
+                else:
+                    result["status"] = "inconclusive"
+                result["reason"] += " Metasploit did not complete an approved exploit execution."
             self.report["verification"] = result
             if self.report["status"] == "pending":
                 self.report["status"] = result["status"]
