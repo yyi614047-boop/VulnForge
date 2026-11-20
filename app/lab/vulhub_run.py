@@ -59,33 +59,6 @@ class SourcePlan(StrictModel):
     operations: list[Operation] = Field(default_factory=list, max_length=30)
 
 
-class EffectCheck(StrictModel):
-    status: Literal["success", "not_reproduced", "inconclusive"]
-    reason: str = Field(min_length=1)
-    evidence_quotes: list[str] = Field(default_factory=list)
-
-
-class AgentDecision(StrictModel):
-    action: Literal["execute", "read_source", "logs", "finish", "abort"]
-    reason: str = Field(min_length=1)
-    operation: Operation | None = None
-    source_path: str | None = None
-
-    @model_validator(mode="after")
-    def validate_arguments(self):
-        if self.action == "execute" and self.operation is None:
-            raise ValueError("execute requires an operation")
-        if self.action == "read_source" and not self.source_path:
-            raise ValueError("read_source requires a source_path")
-        return self
-
-
-class LoopState(TypedDict, total=False):
-    turn: int
-    decision: dict
-    status: str
-
-
 def source_model():
     """Use process settings first, then the project's existing LLM_* settings."""
     from langchain_openai import ChatOpenAI
