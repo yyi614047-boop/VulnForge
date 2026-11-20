@@ -7,6 +7,8 @@ step remain mandatory at the execution boundary.
 from __future__ import annotations
 
 import ipaddress
+import hashlib
+import json
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -24,6 +26,39 @@ class CompatibilityAssessment(DomainModel):
     checked_fields: list[str] = Field(default_factory=list, max_length=30)
 
 
+class LabNetworkAttestation(DomainModel):
+    """Runtime evidence binding a target endpoint to one internal Docker network."""
+    project: str = Field(pattern=r"^lab-[a-z0-9][a-z0-9_-]{0,48}$")
+    service: str = Field(min_length=1, max_length=64)
+    compose_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    target_container_id: str = Field(min_length=12, max_length=128)
+    target_host: str = Field(min_length=7, max_length=45)
+    target_port: int = Field(ge=1, le=65535)
+    published_host_port: int = Field(ge=1, le=65535)
+    network_name: str = Field(min_length=1, max_length=128)
+    network_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    network_internal: Literal[True] = True
+    target_networks: list[str] = Field(min_length=1, max_length=8)
+    metasploit_container_id: str = Field(min_length=12, max_length=128)
+    metasploit_host: str = Field(min_length=7, max_length=45)
+    metasploit_networks: list[str] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def validate_isolated_network(self):
+        for value, label in ((self.target_host, "target"), (self.metasploit_host, "Metasploit")):
+            address = ipaddress.ip_address(value)
+            if address.version != 4 or not address.is_private or address.is_loopback or address.is_link_local:
+                raise ValueError(f"{label} endpoint must be a private, non-loopback IPv4 address")
+        if self.target_networks != [self.network_name] or self.metasploit_networks != [self.network_name]:
+            raise ValueError("Both containers must be attached only to the attested internal network")
+        if self.target_container_id == self.metasploit_container_id:
+            raise ValueError("Target and Metasploit must be separate containers")
+        return self
+
+    def fingerprint(self) -> str:
+        payload = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
 class PoCExecutionSpec(DomainModel):
     """A concrete, target-bound invocation proposal for one existing module."""
 
@@ -34,6 +69,7 @@ class PoCExecutionSpec(DomainModel):
     module_metadata_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     target_id: str = Field(min_length=1, max_length=200)
     target_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    target_attestation: LabNetworkAttestation | None = None
     cve_id: str = Field(pattern=r"^CVE-[0-9]{4}-[0-9]{4,}$")
     target_host: str = Field(min_length=1, max_length=253)
     target_port: int = Field(ge=1, le=65535)
@@ -50,6 +86,11 @@ class PoCExecutionSpec(DomainModel):
             raise ValueError("Metasploit option names must be simple identifiers")
         if any(len(value) > 4000 for value in self.options.values()):
             raise ValueError("Metasploit option values exceed the supported length")
+        if self.target_attestation is not None and (
+            self.target_host != self.target_attestation.target_host
+            or self.target_port != self.target_attestation.target_port
+        ):
+            raise ValueError("Execution target endpoint must match the Docker network attestation")
         return self
 
 
@@ -59,6 +100,7 @@ def assess_metasploit_compatibility(
     *,
     target_host: str = "127.0.0.1",
     target_port: int,
+    target_attestation: LabNetworkAttestation | None = None,
     supplied_options: dict[str, str] | None = None,
 ) -> CompatibilityAssessment:
     """Check deterministic prerequisites without guessing product/version compatibility."""
@@ -77,18 +119,25 @@ def assess_metasploit_compatibility(
     else:
         checked.append("module_metadata_cve_reference")
 
-    try:
-        address = ipaddress.ip_address(target_host)
-        if not address.is_loopback:
-            blockers.append("V1 currently permits loopback targets only.")
-    except ValueError:
-        if target_host != "localhost":
-            blockers.append("V1 target host must be localhost or a loopback IP address.")
-    checked.append("target_host_scope")
-
-    if target_port not in {port for ports in target.environment.published_ports.values() for port in ports}:
-        blockers.append("Target port is not declared in the selected target environment.")
-    checked.append("target_published_port")
+    if target_attestation is None:
+        try:
+            address = ipaddress.ip_address(target_host)
+            if not address.is_loopback:
+                blockers.append("Without Docker attestation, V1 permits loopback targets only.")
+        except ValueError:
+            if target_host != "localhost":
+                blockers.append("Without Docker attestation, target host must be localhost or loopback.")
+        if target_port not in {port for ports in target.environment.published_ports.values() for port in ports}:
+            blockers.append("Target port is not declared in the selected target environment.")
+    else:
+        target_host = target_attestation.target_host
+        if target_port != target_attestation.target_port:
+            blockers.append("Target port does not match the Docker network attestation.")
+        if target_attestation.published_host_port not in {
+            port for ports in target.environment.published_ports.values() for port in ports
+        }:
+            blockers.append("Attested published host port is not declared by the selected target environment.")
+    checked.append("target_endpoint_attestation")
 
     known_options = {option.name: option for option in candidate.options}
     supplied = supplied_options or {}
@@ -140,12 +189,16 @@ def build_poc_execution_spec(
     *,
     target_host: str = "127.0.0.1",
     target_port: int,
+    target_attestation: LabNetworkAttestation | None = None,
     supplied_options: dict[str, str] | None = None,
 ) -> tuple[PoCExecutionSpec, CompatibilityAssessment]:
     """Build a review-only invocation proposal after deterministic prerequisite checks."""
+    if target_attestation is not None:
+        target_host = target_attestation.target_host
+        target_port = target_attestation.target_port
     assessment = assess_metasploit_compatibility(
         candidate, target, target_host=target_host, target_port=target_port,
-        supplied_options=supplied_options,
+        target_attestation=target_attestation, supplied_options=supplied_options,
     )
     if assessment.blockers:
         raise ValueError("PoC execution spec rejected: " + " ".join(assessment.blockers))
@@ -166,6 +219,7 @@ def build_poc_execution_spec(
         module_metadata_sha256=candidate.metadata_sha256,
         target_id=target.target_id,
         target_fingerprint=target.fingerprint(),
+        target_attestation=target_attestation,
         cve_id=target.vulnerability_id,
         target_host=target_host,
         target_port=target_port,

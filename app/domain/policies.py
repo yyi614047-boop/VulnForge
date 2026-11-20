@@ -1,4 +1,5 @@
 """Deterministic authorization contracts; target descriptions never grant permissions."""
+import re
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -25,6 +26,7 @@ class ExecutionPolicy(DomainModel):
     allow_target_scripts: bool = False
     allow_keep_environment: bool = False
     approved_poc_candidates: dict[str, str] = Field(default_factory=dict, max_length=500)
+    approved_lab_networks: dict[str, str] = Field(default_factory=dict, max_length=500)
     allow_metasploit_check: bool = False
     allow_metasploit_execute: bool = False
     allow_unknown_poc_compatibility: bool = False
@@ -37,6 +39,8 @@ class ExecutionPolicy(DomainModel):
         hashes = [*self.approved_target_hashes.values(), *self.approved_reproduction_hashes.values(), *self.approved_poc_candidates.values()]
         if any(len(value) != 64 or any(c not in "0123456789abcdef" for c in value) for value in hashes):
             raise ValueError("Approved target and reproduction bindings must be SHA-256 fingerprints")
+        if any(not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", name) for name in self.approved_lab_networks.values()):
+            raise ValueError("Approved lab network names must be explicit Docker network names")
         if any(port < 1 or port > 65535 for port in self.allowed_ports):
             raise ValueError("Allowed ports must be valid port numbers")
         if self.network_scope == "loopback_only" and not self.allowed_hosts <= {"127.0.0.1", "localhost", "::1"}:
@@ -70,6 +74,28 @@ class ExecutionPolicy(DomainModel):
             raise PermissionError("Target requires an image build disabled by policy")
         if target.reproduction_entrypoints and not self.allow_target_scripts:
             raise PermissionError("Target scripts are disabled by execution policy")
+
+    def authorize_metasploit_target_attestation(self, target: TargetSpec, attestation, *,
+                                                expected_compose_sha256: str) -> None:
+        """Authorize a runtime Docker endpoint only on a pre-approved internal lab network."""
+        self.authorize_target(target)
+        approved_network = self.approved_lab_networks.get(target.target_id)
+        if approved_network is None or approved_network != attestation.network_name:
+            raise PermissionError("Docker lab network is not explicitly approved for this target")
+        if attestation.network_internal is not True:
+            raise PermissionError("Metasploit target network must be Docker-internal")
+        if attestation.compose_sha256 != expected_compose_sha256:
+            raise PermissionError("Docker attestation Compose fingerprint differs from the reviewed environment")
+        if attestation.service not in self.allowed_services:
+            raise PermissionError("Attested target service is outside the execution policy")
+        if attestation.service not in target.environment.services:
+            raise PermissionError("Attested target service is not declared by the selected target")
+        if attestation.published_host_port not in self.allowed_ports:
+            raise PermissionError("Attested published host port is outside the execution policy")
+        if attestation.published_host_port not in target.environment.published_ports.get(attestation.service, []):
+            raise PermissionError("Attested published host port does not match the selected target service")
+        if attestation.target_networks != [approved_network] or attestation.metasploit_networks != [approved_network]:
+            raise PermissionError("Target and Metasploit must have exactly one shared approved network")
 
     def authorize_metasploit_candidate(
         self, candidate_id: str, metadata_sha256: str, *, action: Literal["check", "execute"],

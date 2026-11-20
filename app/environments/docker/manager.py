@@ -62,18 +62,35 @@ def load_compose(source: Path, *, base: Path | None = None) -> dict:
         config = candidates[0]
     else:
         config = yaml.safe_load(text)
-    if not isinstance(config, dict) or set(config) != {"services"}:
-        raise ValueError("Only a top-level services mapping is supported")
+    if not isinstance(config, dict) or set(config) - {"services", "networks"} or "services" not in config:
+        raise ValueError("Only top-level services and internal networks are supported")
+    networks = config.get("networks", {})
+    if not isinstance(networks, dict):
+        raise ValueError("Compose networks must be a mapping")
+    for network_name, network in networks.items():
+        if (not isinstance(network_name, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", network_name)
+                or not isinstance(network, dict) or set(network) - {"internal", "name"}
+                or network.get("internal") is not True):
+            raise ValueError("Only explicitly internal Docker networks are supported")
+        explicit_name = network.get("name")
+        if explicit_name is not None and (not isinstance(explicit_name, str)
+                or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", explicit_name)):
+            raise ValueError("Invalid explicit Docker network name")
     services = config["services"]
     if not isinstance(services, dict) or not services:
         raise ValueError("At least one service is required")
     base = base or source.parent
-    allowed = {"image", "build", "volumes", "ports", "environment", "command", "entrypoint", "healthcheck", "depends_on"}
+    allowed = {"image", "build", "volumes", "ports", "environment", "command", "entrypoint", "healthcheck", "depends_on", "networks"}
     for name, service in services.items():
         if not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", name):
             raise ValueError("Invalid service name")
         if not isinstance(service, dict) or set(service) - allowed:
             raise ValueError(f"Unsupported Compose fields in {name}")
+        service_networks = service.get("networks", [])
+        if (not isinstance(service_networks, list)
+                or any(not isinstance(item, str) or item not in networks for item in service_networks)
+                or len(service_networks) != len(set(service_networks))):
+            raise ValueError(f"Service {name} references an undeclared or duplicate network")
         build = service.get("build")
         if build is not None:
             if isinstance(build, str):
@@ -302,85 +319,92 @@ class DockerLab:
         evidence = json.loads(result.stdout)
         return {**evidence, "service": service, "path": path}
 
-    def resolve_target_endpoint(self, service: str, published_port: int, *, network_name: str, metasploit_container: str, timeout: int = 15) -> dict:
-        """Resolve one running Compose service to its private container IP/port.
+    def resolve_target_endpoint(self, service: str, published_port: int, *, network_name: str,
+                                metasploit_container: str, timeout: int = 15) -> dict:
+        """Attest that target and Metasploit share one explicitly internal Docker network.
 
-        The published port must be explicitly bound to loopback in the reviewed
-        Compose file. The returned private endpoint is intended for a separately
-        network-attached Metasploit container, never for arbitrary host targets.
+        Both containers must have exactly one network attachment. This prevents a
+        second bridge/host-facing network from bypassing Docker internal egress restrictions.
         """
         config = self.configuration()
         if service not in config["services"]:
             raise ValueError("Target service is not declared in the reviewed Compose file")
         declared = config["services"][service].get("ports", [])
-        if not any(
-            isinstance(item, str)
-            and re.fullmatch(rf"127\.0\.0\.1:{published_port}:[0-9]+(?:/tcp)?", item)
-            for item in declared
-        ):
+        if not any(isinstance(item, str) and re.fullmatch(
+            rf"127\.0\.0\.1:{published_port}:[0-9]+/tcp", item) for item in declared):
             raise ValueError("Target port must be explicitly published on loopback as TCP")
 
-        listed = self._invoke([*self._prefix(), "ps", "-q", service], timeout)
-        if listed.returncode:
-            raise ToolExecutionError(f"Cannot list target container: {listed.stderr}")
-        container_ids = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
-        if len(container_ids) != 1:
-            raise ValueError("Expected exactly one container for the selected target service")
-        inspected = self._invoke(["docker", "inspect", container_ids[0]], timeout)
-        if inspected.returncode:
-            raise ToolExecutionError(f"Cannot inspect target container: {inspected.stderr}")
+        service_networks = config["services"][service].get("networks", [])
+        network_alias = next((name for name in service_networks
+                              if config["networks"][name].get("name", f"{self.project}_{name}") == network_name), None)
+        if network_alias is None or config["networks"][network_alias].get("internal") is not True:
+            raise ValueError("Target service must use the approved internal Docker network")
+
+        network_result = self._invoke(["docker", "network", "inspect", network_name], timeout)
+        if network_result.returncode:
+            raise ToolExecutionError(f"Cannot inspect isolated Docker network: {network_result.stderr}")
         try:
-            rows = json.loads(inspected.stdout)
-            if not isinstance(rows, list) or len(rows) != 1:
-                raise ValueError("Unexpected Docker inspect response")
-            row = rows[0]
-            if row.get("State", {}).get("Running") is not True:
-                raise ValueError("Selected target container is not running")
-            port_map = row.get("NetworkSettings", {}).get("Ports") or {}
+            network_rows = json.loads(network_result.stdout)
+            if not isinstance(network_rows, list) or len(network_rows) != 1:
+                raise ValueError("Unexpected Docker network inspect response")
+            network_row = network_rows[0]
+            network_id = network_row.get("Id")
+            if network_row.get("Name") != network_name or network_row.get("Internal") is not True:
+                raise ValueError("Docker network is not the approved internal network")
+            if not isinstance(network_id, str) or not re.fullmatch(r"[0-9a-f]{64}", network_id):
+                raise ValueError("Docker returned an invalid network ID")
+            listed = self._invoke([*self._prefix(), "ps", "-q", service], timeout)
+            if listed.returncode:
+                raise ToolExecutionError(f"Cannot list target container: {listed.stderr}")
+            container_ids = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+            if len(container_ids) != 1:
+                raise ValueError("Expected exactly one container for the selected target service")
+            def inspect_container(container_id: str, label: str) -> dict:
+                result = self._invoke(["docker", "inspect", container_id], timeout)
+                if result.returncode:
+                    raise ToolExecutionError(f"Cannot inspect {label} container: {result.stderr}")
+                rows = json.loads(result.stdout)
+                if not isinstance(rows, list) or len(rows) != 1:
+                    raise ValueError(f"Unexpected {label} container inspect response")
+                row = rows[0]
+                if row.get("State", {}).get("Running") is not True:
+                    raise ValueError(f"Selected {label} container is not running")
+                attached = row.get("NetworkSettings", {}).get("Networks") or {}
+                if set(attached) != {network_name}:
+                    raise ValueError(f"{label} container must be attached only to the approved internal network")
+                attachment = attached[network_name]
+                if attachment.get("NetworkID") != network_id:
+                    raise ValueError(f"{label} container network ID does not match Docker network inspection")
+                address = ipaddress.ip_address(attachment.get("IPAddress", ""))
+                if address.version != 4 or not address.is_private or address.is_loopback or address.is_link_local:
+                    raise ValueError(f"{label} container must have a private, non-loopback IPv4 address")
+                return {"id": row.get("Id", container_id), "ip": str(address), "row": row}
+            target = inspect_container(container_ids[0], "target")
+            msf = inspect_container(metasploit_container, "Metasploit")
+            port_map = target["row"].get("NetworkSettings", {}).get("Ports") or {}
             matches = []
             for container_binding, host_bindings in port_map.items():
                 match = re.fullmatch(r"([0-9]+)/tcp", str(container_binding))
                 if not match or not isinstance(host_bindings, list):
                     continue
                 for binding in host_bindings:
-                    if (binding.get("HostIp") == "127.0.0.1"
-                            and str(binding.get("HostPort")) == str(published_port)):
+                    if binding.get("HostIp") == "127.0.0.1" and str(binding.get("HostPort")) == str(published_port):
                         matches.append(int(match.group(1)))
             if len(matches) != 1:
                 raise ValueError("Published target port does not resolve to exactly one TCP container port")
-            networks = row.get("NetworkSettings", {}).get("Networks") or {}
-            network = networks.get(network_name)
-            if not isinstance(network, dict) or not network.get("IPAddress"):
-                raise ValueError("Target container is not attached to the requested Metasploit network")
-            ip = ipaddress.ip_address(network["IPAddress"])
-            if ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local:
-                raise ValueError("Selected target network must provide a private, non-loopback IPv4 address")
-            address = str(ip)
-            msf_inspected = self._invoke(["docker", "inspect", metasploit_container], timeout)
-            if msf_inspected.returncode:
-                raise ValueError("Cannot inspect the configured Metasploit container")
-            msf_rows = json.loads(msf_inspected.stdout)
-            if not isinstance(msf_rows, list) or len(msf_rows) != 1:
-                raise ValueError("Unexpected Metasploit container inspect response")
-            msf_row = msf_rows[0]
-            if msf_row.get("State", {}).get("Running") is not True:
-                raise ValueError("Configured Metasploit container is not running")
-            msf_network = (msf_row.get("NetworkSettings", {}).get("Networks") or {}).get(network_name)
-            if not isinstance(msf_network, dict) or not msf_network.get("IPAddress"):
-                raise ValueError("Metasploit container is not attached to the selected target network")
+            compose_sha256 = __import__("hashlib").sha256(
+                json.dumps(config, sort_keys=True).encode("utf-8")
+            ).hexdigest()
             return {
-                "project": self.project,
-                "service": service,
-                "container_id": container_ids[0],
-                "host": address,
-                "port": matches[0],
-                "published_host_port": published_port,
-                "network": network_name,
-                "metasploit_container": metasploit_container,
-                "metasploit_network_ip": msf_network["IPAddress"],
+                "project": self.project, "service": service, "compose_sha256": compose_sha256,
+                "target_container_id": target["id"], "target_host": target["ip"],
+                "target_port": matches[0], "published_host_port": published_port,
+                "network_name": network_name, "network_id": network_id, "network_internal": True,
+                "target_networks": [network_name], "metasploit_container_id": msf["id"],
+                "metasploit_host": msf["ip"], "metasploit_networks": [network_name],
             }
         except (KeyError, TypeError, ValueError, ipaddress.AddressValueError) as exc:
-            raise ValueError(f"Cannot safely resolve target endpoint: {exc}") from exc
+            raise ValueError(f"Cannot safely attest isolated target endpoint: {exc}") from exc
 
 
     def probe_version(self, service, command, *, timeout=30):

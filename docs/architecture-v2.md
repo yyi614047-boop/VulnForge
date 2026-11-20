@@ -1,7 +1,7 @@
 # VulnForge Architecture v2
 
 > Product direction: **Agent-driven Vulnerability Reproduction Platform**.
-> Implementation status: the core LangGraph reproduction path and canonical execution-plan migration exist; Read-only Metasploit CVE discovery and module inspection plus opt-in Researcher/Planner candidate selection are implemented on this branch; RPC execution and container egress isolation remain pending.
+> Implementation status: the core LangGraph reproduction path and canonical execution-plan migration exist; Read-only Metasploit CVE discovery and module inspection plus opt-in Researcher/Planner candidate selection are implemented on this branch; RPC execution is implemented behind policy gates; Docker internal-network target attestation is now wired, while live Docker/Metasploit validation remains pending.
 
 > PoC scope: discover, inspect, select, validate, execute, and verify **existing** PoCs and exploit modules. Autonomous PoC authoring is out of scope.
 
@@ -280,3 +280,36 @@ The stage revalidates the plan, research-bundle fingerprint, target/reproduction
 The existing StepExecutor verification phase evaluates reviewed target assertions independently. A completed Metasploit job is not proof of vulnerability: final success still depends on independent evidence. Cleanup remains in the normal pipeline finalizer.
 
 The V1 integration uses the RPC adapter loopback target restriction. The private Docker-network endpoint resolver is available separately, but private-address attestation is not yet wired into the RPC authorization contract. Do not broaden policy to arbitrary private or public targets to work around this limitation.
+
+
+## Isolated Metasploit target networking
+
+Metasploit no longer receives an arbitrary private IP. The optional execution path requires a reviewed Compose service attached to an explicitly internal network and a separately running Metasploit container attached only to that same network.
+
+Example Compose fragment:
+
+```yaml
+services:
+  web:
+    image: example/web:1.2
+    ports:
+      - "127.0.0.1:18080:8080/tcp"
+    networks: [exploit-lab]
+networks:
+  exploit-lab:
+    internal: true
+    name: lab-demo-isolated
+```
+
+The operator must set `approved_lab_networks` in the execution policy, mapping the exact target ID to the explicit Docker network name, and set `MSF_CONTAINER_NAME` to the already-running Metasploit container. The Metasploit RPC HTTP endpoint remains host-loopback-only; only the module target address uses the attested private container IP.
+
+Before creating a `PoCExecutionSpec`, Docker inspection verifies:
+- The named Docker network exists and Docker reports `Internal: true`.
+- The target and Metasploit containers are running and share the exact inspected network ID.
+- Each container has exactly one network attachment, preventing an additional bridge/host-facing network from bypassing internal-network egress isolation.
+- The target service and published TCP port match the reviewed Compose configuration and policy.
+- The Compose fingerprint matches the research bundle; the resulting attestation binds both container IDs, private IPs, network ID, and published-to-container port mapping.
+
+Private target addresses are rejected unless this attestation is present and the exact network name is approved in policy. The runtime does not infer authorization from RFC1918 addressing. Callback payloads remain separately disabled unless policy explicitly enables them.
+
+Live Docker daemon, Metasploit RPC, exploit execution, and teardown validation remain required; fake-Docker tests prove the authorization checks, not real-world isolation.

@@ -1,6 +1,7 @@
 """LangGraph is the orchestration layer; components are independently testable."""
 from pathlib import Path
 from threading import Lock
+import os
 
 from app.runtime.context import isolated_run, state_boundary
 
@@ -135,9 +136,22 @@ class Pipeline:
         try:
             target = TargetSpec.model_validate(state["target_spec"])
             reproduction = ReproductionSpec.model_validate(state["reproduction_spec"])
+            network_name = self.execution_policy.approved_lab_networks.get(target.target_id)
+            metasploit_container = os.environ.get("MSF_CONTAINER_NAME", "")
+            if not network_name or not metasploit_container:
+                raise PermissionError("Metasploit requires an explicitly approved internal lab network and MSF_CONTAINER_NAME")
+            if self.executor.lab is None or not hasattr(self.executor.lab, "resolve_target_endpoint"):
+                raise PermissionError("The active Docker lab cannot attest the selected target endpoint")
+            attestation = self.executor.lab.resolve_target_endpoint(
+                reproduction.service, reproduction.port, network_name=network_name,
+                metasploit_container=metasploit_container,
+            )
+            if attestation.get("project") != self.project:
+                raise PermissionError("Docker target attestation belongs to a different lab project")
             result = MetasploitCandidateRunner(self.metasploit_adapter).run(
                 plan=plan, bundle=state["bundle"], target=target,
                 reproduction=reproduction, policy=self.execution_policy,
+                target_attestation=attestation,
             )
             self.executor.report["metasploit"] = result
             if result["status"] == "not_reproduced":
