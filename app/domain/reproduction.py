@@ -11,7 +11,7 @@ class StrictModel(BaseModel):
 
 
 class Probe(StrictModel):
-    id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,199}$")
+    id: str = Field(pattern=r"^[a-zA-Z0-9_-]+$")
     path: str = Field(pattern=r"^/[^\r\n]*$")
     method: Literal["GET", "POST"] = "GET"
     body: str | None = None
@@ -57,7 +57,7 @@ class VersionProbe(StrictModel):
 
 class ReproductionSpec(StrictModel):
     """Reviewed reproduction recipe; never an execution authorization policy."""
-    id: str = Field(pattern=r"^[a-zA-Z0-9_-]+$")
+    id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,199}$")
     title: str = Field(min_length=1)
     product: str = Field(min_length=1)
     root_cause: str | None = Field(default=None, max_length=4000)
