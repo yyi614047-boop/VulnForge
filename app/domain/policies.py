@@ -28,6 +28,7 @@ class ExecutionPolicy(DomainModel):
     allow_metasploit_check: bool = False
     allow_metasploit_execute: bool = False
     allow_unknown_poc_compatibility: bool = False
+    allow_metasploit_payloads: bool = False
 
     @model_validator(mode="after")
     def validate_policy(self):
