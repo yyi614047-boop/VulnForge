@@ -9,7 +9,7 @@ The project uses Markdown role instructions, LangChain with the OpenAI API for m
 The only primary execution architecture is the staged Pipeline:
 
 1. **Researcher** reads Markdown and Compose files declared by a reviewed reproduction specification and produces source-cited evidence.
-2. **Planner** receives the research bundle and Markdown evidence, then returns a typed `DeploymentPlan`.
+2. **Planner** receives the research bundle and Markdown evidence, then returns a typed domain `ExecutionPlan`.
 3. **Plan validation** binds the plan to the trusted reproduction specification, source hashes, allowed actions, dependencies, and execution budgets.
 4. **Deployer** prepares and starts the Docker environment.
 5. **Reproducer** executes the reviewed HTTP requests and scripts in the plan.
@@ -37,7 +37,7 @@ RAG, BM25, embedding indexes, the experimental source-driven runner, and the dup
 
 ## Transitional target inputs
 
-The runtime now reads reviewed YAML `ReproductionSpec` files through `TargetCatalog` from `reproductions/`. The old `knowledge/` directory and `KnowledgeBase` compatibility modules have been removed. `TargetSpec` remains a separate, untrusted description of upstream target material; `ExecutionPolicy` is the independent authorization contract. The CLI emits a policy template with `--action policy-preview`; a reviewed `ExecutionPolicy` JSON file is mandatory for `run`. The Planner emits the canonical domain `ExecutionPlan` directly. The Pipeline and Executor use that same contract without a legacy plan adapter. Plans bind reproduction, Compose, and asset fingerprints; the Executor revalidates lifecycle order, evidence references, policy actions, and source fingerprints before opening the lab.
+The runtime now reads reviewed YAML `ReproductionSpec` files through `TargetCatalog` from `reproductions/`. The old `knowledge/` directory and `KnowledgeBase` compatibility modules have been removed. `TargetSpec` remains a separate, untrusted description of upstream target material; `ExecutionPolicy` is the independent authorization contract. The CLI emits a policy template with `--action policy-preview`; a reviewed `ExecutionPolicy` JSON file is mandatory for both `plan` and `run`. The Planner emits the canonical domain `ExecutionPlan` directly. The Pipeline and Executor use that same contract without a legacy plan adapter. Plans bind reproduction, Compose, and asset fingerprints; the Executor revalidates lifecycle order, evidence references, policy actions, and source fingerprints before opening the lab.
 
 The upstream Vulhub corpus now lives under `targets/vulhub/` as untrusted target material. `VulhubTargetLoader` converts environments into `TargetSpec` candidates; it never grants execution permission. Use `--action target-search` or `--action target-inspect` to explore candidates, and `--action request-validate` to validate a `ReproductionRequest`.
 
@@ -69,9 +69,9 @@ python -m app.cli --action target-search --query CVE-2021-25646
 python -m app.cli --action target-inspect --environment druid/CVE-2021-25646
 python -m app.cli --action engine --check-only
 python -m app.cli CVE-2021-25646 --specs reproductions --action research
-python -m app.cli CVE-2021-25646 --specs reproductions --action plan
 python -m app.cli CVE-2021-25646 --specs reproductions --action policy-preview
 # Review/edit the emitted policy template, then save it as a JSON file
+python -m app.cli CVE-2021-25646 --specs reproductions --action plan --policy-file policies/local.json
 python -m app.cli CVE-2021-25646 --specs reproductions --action run --policy-file policies/local.json
 ```
 

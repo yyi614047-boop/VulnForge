@@ -219,7 +219,6 @@ No mass deletion or main-branch merge should happen before the relevant migratio
 
 ### Pending before calling the migration complete
 
-- Replace the Planner's legacy `DeploymentPlan` output with direct `ExecutionPlan` generation; the executor now dispatches the domain plan, while the adapter and legacy schema remain only as a temporary planning compatibility layer.
 - Move workflow, agent, execution, tool, and Docker environment implementations into the target package layout without duplicate implementations.
 - Add container egress isolation so `network_scope` constrains Docker pull/build and container traffic, not only loopback HTTP probes.
 - Decide whether Metasploit is an optional check provider or corroborating verifier; do not make it mandatory before the safety contract is defined.
@@ -235,14 +234,14 @@ No mass deletion or main-branch merge should happen before the relevant migratio
 
 ### Still required
 
-- Complete the single-plan migration: the Planner still emits legacy `DeploymentPlan`; the adapter validates and converts it to `ExecutionPlan`, which the executor now dispatches. The legacy plan is retained only for source/asset hash validation and compatibility during the transition.
+- Completed: Planner now emits canonical `ExecutionPlan` directly; LangGraph and Executor pass and dispatch the same domain plan. The legacy plan adapter has been removed.
 - Run a representative, explicitly reviewed local reproduction through Docker, including cleanup and independent verification; this repository currently contains no reviewed reproduction YAML fixture, so an end-to-end run cannot be honestly claimed.
 
 
 ### Policy and verification integration update
 
-- Added `policy-preview` to emit target and reproduction fingerprints plus a review-only JSON policy template; `run` requires an explicit policy file.
-- Bound `TargetSpec`, `ReproductionSpec`, `ExecutionPolicy`, and the adapted `ExecutionPlan` in the LangGraph planning stage.
+- Added `policy-preview` to emit target and reproduction fingerprints plus a review-only JSON policy template; both `plan` and `run` require an explicit policy file.
+- Bound `TargetSpec`, `ReproductionSpec`, `ExecutionPolicy`, and the canonical `ExecutionPlan` in the LangGraph planning stage.
 - The executor re-derives the target and reproduction fingerprints from the current catalog before opening the lab, then revalidates every planned action and retry budget.
 - Target source files and Compose inputs are content-hashed; policy approval rejects unpinned remote sources and non-loopback published ports.
 - Recovery retries now require the action to be explicitly marked retryable in policy and remain within the policy recovery budget.
