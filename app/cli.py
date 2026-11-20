@@ -261,9 +261,15 @@ def main():
                     target_port=args.target_port if args.target_port is not None else spec.port,
                     overrides=overrides,
                 )
+                option_payload = option_result.model_dump(mode="json")
+                option_payload["options"] = {
+                    name: ("<redacted>" if any(token in name.upper() for token in ("PASS", "TOKEN", "SECRET", "API_KEY", "PRIVATE_KEY", "CRED"))
+                           else value)
+                    for name, value in option_result.options.items()
+                }
                 prepared.append({
                     "candidate": candidate.model_dump(mode="json"),
-                    "prepared_options": option_result.model_dump(mode="json"),
+                    "prepared_options": option_payload,
                     "options_sha256": options_fingerprint(option_result.options),
                     "approval_template": {
                         "policy_id": "REVIEW_REQUIRED",
