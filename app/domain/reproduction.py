@@ -1,5 +1,8 @@
 """Typed, reviewed reproduction assertions and execution inputs."""
+import hashlib
+import json
 from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -9,7 +12,7 @@ class StrictModel(BaseModel):
 
 class Probe(StrictModel):
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]+$")
-    path: str = Field(pattern=r"^/[^\\r\\n]*$")
+    path: str = Field(pattern=r"^/[^\r\n]*$")
     method: Literal["GET", "POST"] = "GET"
     body: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
@@ -30,7 +33,7 @@ class Script(StrictModel):
 class FileEvidence(StrictModel):
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]+$")
     service: str
-    path: str = Field(pattern=r"^/[^\\r\\n]*$")
+    path: str = Field(pattern=r"^/[^\r\n]*$")
     contains: str = Field(min_length=1)
 
 
@@ -74,6 +77,10 @@ class ReproductionSpec(StrictModel):
     version_probes: list[VersionProbe] = Field(default_factory=list, max_length=10)
     purpose: Literal["vulnerability_reproduction", "demo"] = "vulnerability_reproduction"
 
+    def fingerprint(self) -> str:
+        payload = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
     @model_validator(mode="after")
     def validate_probes(self):
         ids = [probe.id for probe in [self.health, *self.reproduction, *self.initialization, *self.scripts,
@@ -95,5 +102,4 @@ class ReproductionSpec(StrictModel):
         return self
 
 
-# Transitional name for existing Pipeline call sites.
 Card = ReproductionSpec

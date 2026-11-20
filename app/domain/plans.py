@@ -1,6 +1,9 @@
 """Typed execution plans and dependency invariants, independent of LangGraph."""
 from typing import Literal
+
 from pydantic import Field, model_validator
+
+from app.domain.reproduction import ReproductionSpec
 from app.domain.targets import DomainModel, TargetSpec
 
 ExecutionPhase = Literal["deploy", "reproduce", "verify", "cleanup"]
@@ -52,11 +55,11 @@ class ExecutionPlan(DomainModel):
             visited.add(step.step_id)
         return self
 
-    def validate_policy(self, policy, target: TargetSpec):
+    def validate_policy(self, policy, target: TargetSpec, reproduction_spec: ReproductionSpec):
         if self.policy_id != policy.policy_id:
             raise PermissionError("Plan policy binding does not match the active policy")
         if self.target_id != target.target_id:
             raise PermissionError("Plan target binding does not match the selected target")
-        policy.authorize_target(target)
+        policy.authorize_target(target, reproduction_spec)
         for step in self.steps:
             policy.authorize_action(step.action, timeout_seconds=step.timeout_seconds, retries=step.retries)
