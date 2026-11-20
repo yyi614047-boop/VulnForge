@@ -24,12 +24,16 @@ class ExecutionPolicy(DomainModel):
     allow_image_build: bool = False
     allow_target_scripts: bool = False
     allow_keep_environment: bool = False
+    approved_poc_candidates: dict[str, str] = Field(default_factory=dict, max_length=500)
+    allow_metasploit_check: bool = False
+    allow_metasploit_execute: bool = False
+    allow_unknown_poc_compatibility: bool = False
 
     @model_validator(mode="after")
     def validate_policy(self):
         if not self.retryable_actions <= self.allowed_actions:
             raise ValueError("Retryable actions must also be explicitly allowed")
-        hashes = [*self.approved_target_hashes.values(), *self.approved_reproduction_hashes.values()]
+        hashes = [*self.approved_target_hashes.values(), *self.approved_reproduction_hashes.values(), *self.approved_poc_candidates.values()]
         if any(len(value) != 64 or any(c not in "0123456789abcdef" for c in value) for value in hashes):
             raise ValueError("Approved target and reproduction bindings must be SHA-256 fingerprints")
         if any(port < 1 or port > 65535 for port in self.allowed_ports):
@@ -65,6 +69,23 @@ class ExecutionPolicy(DomainModel):
             raise PermissionError("Target requires an image build disabled by policy")
         if target.reproduction_entrypoints and not self.allow_target_scripts:
             raise PermissionError("Target scripts are disabled by execution policy")
+
+    def authorize_metasploit_candidate(
+        self, candidate_id: str, metadata_sha256: str, *, action: Literal["check", "execute"],
+        compatibility_status: Literal["compatible", "incompatible", "unknown"],
+    ) -> None:
+        """Require exact candidate approval and action-specific Metasploit permission."""
+        approved_hash = self.approved_poc_candidates.get(candidate_id)
+        if approved_hash is None or approved_hash != metadata_sha256:
+            raise PermissionError("Metasploit candidate is not explicitly approved or its metadata changed")
+        if action == "check" and not self.allow_metasploit_check:
+            raise PermissionError("Metasploit module checks are disabled by execution policy")
+        if action == "execute" and not self.allow_metasploit_execute:
+            raise PermissionError("Metasploit exploit execution is disabled by execution policy")
+        if compatibility_status == "incompatible":
+            raise PermissionError("Metasploit candidate is incompatible with the selected target")
+        if action == "execute" and compatibility_status == "unknown" and not self.allow_unknown_poc_compatibility:
+            raise PermissionError("Unknown product/version compatibility requires explicit policy approval")
 
     def authorize_action(self, action: str, *, timeout_seconds: int, retries: int = 0) -> None:
         if action not in self.allowed_actions:
