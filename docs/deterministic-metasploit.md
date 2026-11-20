@@ -9,25 +9,32 @@ Markdown documents remain the source of truth. The workflow does not require
 
 ## LLM boundary
 
-The only LLM call in the primary `plan` / `run` path is
-`source_planner` in `VulhubRun.plan()`. It translates documented steps into
-the `SourcePlan` schema. Each operation must cite an exact quote from one of
-the source Markdown files. Planning does not decide whether the vulnerability
-was reproduced.
+The only LLM call in the primary `plan` / `run` path is the constrained
+`vulhub_reproduction_builder` in `VulhubRun.plan()`. It receives exactly one
+original Markdown document (prefer `README.md`) as its entire task input and
+acts as a Vulnerability Reproduction Builder. Docker Compose is deliberately
+not included in its prompt; deterministic code reads Compose separately for
+environment setup and validation. Each operation must cite an exact quote
+from that one Markdown document. If the environment has multiple README files
+or no unambiguous Markdown source, planning stops rather than guessing.
+Planning does not decide whether the vulnerability was reproduced.
 
-After planning, execution is deterministic:
+After planning, a compact LangGraph Plan-Act-Observe-Decide loop executes
+operations. The LLM does not participate in runtime decisions; a fixed policy
+continues after a completed step and aborts after a failed step.
 
 1. Snapshot the selected Vulhub environment and rewrite published ports to
    loopback-only bindings.
 2. Start the Docker Compose project.
-3. Execute the validated operations in their listed order.
+3. Execute the validated operations in their listed order and record each observation.
 4. Search Metasploit for modules tagged with the CVE.
 5. Run each candidate module's native `check` method against the local mapped
    port and classify explicit Check outcomes.
 6. Save the report and clean up the Compose project.
 
-No LLM is called during steps 2–6. A failed documented step is recorded and
-stops subsequent documented steps; it is not repaired by an LLM.
+No LLM is called during execution, observation, decision, verification or
+cleanup. A failed documented step is recorded and stops subsequent documented
+steps; it is not repaired by an LLM.
 
 ## Metasploit result semantics
 
