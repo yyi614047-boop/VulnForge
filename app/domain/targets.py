@@ -1,6 +1,7 @@
 """Target descriptions are untrusted evidence-bearing data, never execution permissions."""
 import hashlib
 import json
+import re
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
@@ -53,6 +54,24 @@ class EnvironmentSpec(DomainModel):
         return self
 
 
+class VerificationAssertion(DomainModel):
+    assertion_id: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    evidence_kind: Literal["http", "file", "log"]
+    source: str = Field(min_length=1, max_length=512)
+    operator: Literal["equals", "contains", "regex"]
+    expected_value: str = Field(min_length=1, max_length=4000)
+    required: bool = True
+
+    @model_validator(mode="after")
+    def validate_pattern(self):
+        if self.operator == "regex":
+            try:
+                re.compile(self.expected_value)
+            except re.error as exc:
+                raise ValueError("Invalid verification regex") from exc
+        return self
+
+
 class TargetSpec(DomainModel):
     schema_version: Literal[1] = 1
     target_id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,199}$")
@@ -63,6 +82,7 @@ class TargetSpec(DomainModel):
     sources: list[TargetSource] = Field(min_length=1, max_length=100)
     environment: EnvironmentSpec
     reproduction_entrypoints: list[str] = Field(default_factory=list, max_length=50)
+    verification_assertions: list[VerificationAssertion] = Field(default_factory=list, max_length=100)
 
     @model_validator(mode="after")
     def validate_entrypoints(self):
@@ -70,6 +90,9 @@ class TargetSpec(DomainModel):
             raise ValueError("Reproduction entrypoints must be unique")
         for path in self.reproduction_entrypoints:
             _validate_relative_path(path)
+        assertion_ids = [item.assertion_id for item in self.verification_assertions]
+        if len(assertion_ids) != len(set(assertion_ids)):
+            raise ValueError("Verification assertion IDs must be unique")
         source_ids = [source.source_id for source in self.sources]
         if len(source_ids) != len(set(source_ids)):
             raise ValueError("Target source IDs must be unique")

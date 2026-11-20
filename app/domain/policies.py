@@ -9,6 +9,7 @@ class ExecutionPolicy(DomainModel):
     policy_id: str = Field(min_length=1, max_length=128)
     approved_target_hashes: dict[str, str] = Field(min_length=1, max_length=500)
     allowed_actions: set[ExecutionAction] = Field(min_length=1, max_length=32)
+    retryable_actions: set[ExecutionAction] = Field(default_factory=set)
     allowed_services: set[str] = Field(min_length=1, max_length=100)
     allowed_ports: set[int] = Field(default_factory=set, max_length=100)
     network_scope: Literal["loopback_only", "explicit_allowlist", "disabled"] = "loopback_only"
@@ -22,6 +23,8 @@ class ExecutionPolicy(DomainModel):
 
     @model_validator(mode="after")
     def validate_policy(self):
+        if not self.retryable_actions <= self.allowed_actions:
+            raise ValueError("Retryable actions must also be explicitly allowed")
         if any(len(value) != 64 or any(c not in "0123456789abcdef" for c in value) for value in self.approved_target_hashes.values()):
             raise ValueError("Approved target bindings must be SHA-256 fingerprints")
         if any(port < 1 or port > 65535 for port in self.allowed_ports):

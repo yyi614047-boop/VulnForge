@@ -13,6 +13,7 @@ class Evidence(DomainModel):
     sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     content_ref: str | None = Field(default=None, max_length=2048)
     summary: str = Field(default="", max_length=4000)
+    observed_value: str | int | float | bool | None = None
     trusted: bool = False
 
 
@@ -41,3 +42,18 @@ class ExecutionReport(DomainModel):
     cleanup_status: Literal["pending", "completed", "failed", "not_needed"] = "pending"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     finished_at: datetime | None = None
+
+
+class AssertionResult(DomainModel):
+    assertion_id: str
+    status: Literal["matched", "mismatched", "missing"]
+    evidence_id: str | None = None
+    expected_value: str
+    observed_value: str | int | float | bool | None = None
+    reason: str
+
+
+class VerificationOutcome(DomainModel):
+    status: Literal["success", "not_reproduced", "inconclusive"]
+    checks: list[AssertionResult] = Field(default_factory=list)
+    summary: str = Field(min_length=1, max_length=4000)
