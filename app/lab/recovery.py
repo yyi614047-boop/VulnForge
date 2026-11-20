@@ -33,7 +33,7 @@ class Recovery:
         self.pipeline_factory = pipeline_factory
 
     @agent_session
-    def run(self, identifier, path, *, engine="langgraph"):
+    def run(self, identifier, path)
         """启动一次完整实验，并将最终报告写入指定路径。"""
         path = Path(path)
         if path.exists():
@@ -53,7 +53,7 @@ class Recovery:
                 pipeline = self.pipeline_factory(knowledge, root / "labs", f"{run_id}-r{number+1}",
                     timeout=self.timeout, docker_engine=self.docker_engine, engine_timeout=self.engine_timeout, auto_port=True,
                     )
-                execution = pipeline.run(identifier, execution_path, engine=engine)
+                execution = pipeline.run(identifier, execution_path)
                 row.update(status=execution["status"], cleanup=execution.get("cleanup"))
                 if execution.get("cleanup") not in {"completed", "not_needed"}:
                     report["status"] = "cleanup_failed"
@@ -96,7 +96,7 @@ class Recovery:
                     generated = ScriptAuthoring(knowledge, root / "scripts", self.llm, max_repairs=self.max_repairs-number-1,
                         timeout=self.timeout, docker_engine=self.docker_engine, engine_timeout=self.engine_timeout,
                         pipeline_factory=self.pipeline_factory).run(identifier, root / f"scripts-{number+1}.json",
-                            engine=engine, initial_feedback=feedback)
+                            initial_feedback=feedback)
                     record["result"] = generated["status"]
                     # Script authoring already includes execution and independent verification.
                     report["status"] = generated["status"]

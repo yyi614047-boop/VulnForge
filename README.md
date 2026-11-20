@@ -29,16 +29,16 @@ LangGraph owns the StateGraph, node scheduling, state transitions, and condition
 | Schemas and validation | Pydantic |
 | Tool execution | Custom `StepExecutor` and Docker/HTTP/file tools |
 | Recovery | Markdown-guided Recovery Agent + deterministic retry gate |
-| Knowledge | Reviewed YAML cards + declared Markdown/Compose sources |
+| Legacy target input | Reviewed YAML cards (temporary; being replaced by TargetSpec) |
 | Retrieval | Not part of the application |
 
 RAG, BM25, embedding indexes, the experimental source-driven runner, and the duplicate legacy workflow have been removed. The project does not use Claude Code or Claude Agent SDK.
 
-## Knowledge cards
+## Transitional target inputs
 
-Executable cards belong in `knowledge/cards/`; their `sources` and `environment` paths are resolved relative to that directory. See `app/lab/knowledge.py` for the authoritative Pydantic schema.
+Current implementation still consumes reviewed YAML cards from `knowledge/cards/`. This is a compatibility boundary for the legacy Pipeline, not the target architecture. The next migration replaces this with `TargetSpec` plus a separately trusted `ExecutionPolicy`.
 
-The upstream Vulhub corpus under `knowledge/vulhub/` contains source material, not automatically trusted execution permissions. Files in `knowledge/evaluation-cards/` are documentary review artifacts, not executable Pipeline cards.
+The upstream Vulhub corpus under `knowledge/vulhub/` is retained as target material and will move to `targets/vulhub/`. It is not an execution-permission source.
 
 ## Install
 

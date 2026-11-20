@@ -62,7 +62,7 @@ class ScriptAuthoring:
         self.docker_engine, self.engine_timeout = docker_engine, engine_timeout
 
     @agent_session
-    def run(self, identifier, report_path, *, engine="langgraph", initial_feedback=None):
+    def run(self, identifier, report_path, *, initial_feedback=None)
         """启动一次完整实验，并将最终报告写入指定路径。"""
         report_path = Path(report_path)
         if report_path.exists():
@@ -150,7 +150,7 @@ class ScriptAuthoring:
                 pipeline = self.pipeline_factory(knowledge, attempt_root / "labs", project,
                                                  timeout=self.timeout, docker_engine=self.docker_engine,
                                                  engine_timeout=self.engine_timeout, auto_port=True)
-                execution = pipeline.run(identifier, execution_path, engine=engine)
+                execution = pipeline.run(identifier, execution_path)
                 row.update(status=execution["status"], cleanup=execution.get("cleanup"),
                            verification=execution.get("verification"))
                 atomic_json(report_path, report)

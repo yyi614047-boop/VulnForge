@@ -24,10 +24,9 @@ class PipelineState(TypedDict, total=False):
 
 class Pipeline:
     def __init__(self, knowledge: Path, workspace: Path, project: str, *, llm=None, retries=1, timeout=60, keep=False, executor_options=None,
-                 docker_engine=None, engine_timeout=120, auto_port=False, documented=None):
+                 docker_engine=None, engine_timeout=120, auto_port=False):
         """初始化组件及其运行所需的配置、依赖和状态。"""
         self._run_lock = Lock()
-        self.documented = documented
         self.knowledge, self.workspace, self.project = knowledge, workspace, project
         self.researcher = Researcher(knowledge, llm)
         self.planner = StructuredPlanner(llm)
@@ -43,10 +42,6 @@ class Pipeline:
     def research(self, state):
         """读取实验标识并检索可信资料，更新管线研究状态。"""
         try:
-            if self.documented is not None:
-                from app.lab.document_summary import read_review
-                review = read_review(self.documented, state["identifier"])
-                return {"bundle": {"document_review": review}, "status": "researched"}
             return {"bundle": self.researcher.research(state["identifier"]), "status": "researched"}
         except Exception as exc:
             return {"status": "information_missing", "error": str(exc)}
@@ -56,14 +51,6 @@ class Pipeline:
         """根据研究包生成结构化计划并更新管线规划状态。"""
         if state.get("status") != "researched":
             return {}
-        if self.documented is not None:
-            review = state["bundle"]["document_review"]
-            return {"status": "information_missing",
-                    "error": "Document evidence loaded; no executable deployment plan is available.",
-                    "plan": {"stage": "planning", "document_checks": review["document_check_status"],
-                             "runtime_status": review["runtime_status"],
-                             "unavailable": ["deployment environment", "validated execution plan"],
-                             "skipped": ["deploy", "reproduce", "verify"]}}
         try:
             plan = self.planner.generate(state["bundle"], retries=self.retries, timeout=self.timeout, keep=self.keep)
             return {"plan": plan.model_dump(), "status": "planned"}
@@ -142,28 +129,26 @@ class Pipeline:
         graph.add_edge("cleanup", END)
         return graph.compile()
 
-    def run(self, identifier, report_path, *, engine="langgraph"):
+    def run(self, identifier, report_path)
         """启动一次完整实验，并将最终报告写入指定路径。"""
         if not self._run_lock.acquire(blocking=False):
             raise RuntimeError("Pipeline instance already running; use a separate instance")
         try:
-            return self._run_isolated(identifier, report_path, engine=engine)
+            return self._run_isolated(identifier, report_path)
         finally:
             self.active = False
             self.executor = None
             self._run_lock.release()
 
     @isolated_run
-    def _run_isolated(self, identifier, report_path, *, engine="langgraph"):
+    def _run_isolated(self, identifier, report_path)
         """在隔离上下文中执行指定工作流引擎对应的一次实验。"""
         self.active = False
         self.port_selection = None
-        if engine not in {"langgraph", "sequential"}:
-            raise ValueError("Unknown workflow engine")
-        graph = self.graph() if engine == "langgraph" else None
+        graph = self.graph()
         if report_path.exists():
             raise FileExistsError("Report exists; choose a new report path")
-        if self.auto_port and self.documented is None:
+        if self.auto_port:
             from app.lab.ports import prepare_port
             try:
                 self.knowledge, self.port_selection = prepare_port(self.knowledge, self.workspace, identifier)
@@ -172,18 +157,13 @@ class Pipeline:
                 report = {"id": identifier, "status": "information_missing", "cleanup": "not_needed", "error": str(exc)}
                 atomic_json(report_path, report)
                 return report
-        if self.documented is None:
-            executor_options = dict(self.executor_options)
-            executor_options.setdefault("recovery_controller", self.recovery_controller)
-            executor_options.setdefault("recovery_budget", 1 if self.recovery_controller is not None else 0)
-            self.executor = StepExecutor(self.knowledge, self.workspace, self.project, report_path, **executor_options)
+        executor_options = dict(self.executor_options)
+        executor_options.setdefault("recovery_controller", self.recovery_controller)
+        executor_options.setdefault("recovery_budget", 1 if self.recovery_controller is not None else 0)
+        self.executor = StepExecutor(self.knowledge, self.workspace, self.project, report_path, **executor_options)
         state = {"identifier": identifier}
         try:
-            if graph:
-                state = graph.invoke(state)
-            else:
-                for node in [self.research, self.plan, self.deploy, self.reproduce, self.verification, self.cleanup]:
-                    state.update(node(state))
+            state = graph.invoke(state)
         except BaseException as exc:
             if self.active:
                 self.executor.report.update(status="cancelled" if isinstance(exc, KeyboardInterrupt) else "execution_error", error=str(exc))

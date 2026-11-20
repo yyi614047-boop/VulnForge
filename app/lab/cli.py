@@ -20,7 +20,6 @@ def _parser():
     parser.add_argument("--workspace", type=Path, default=Path(".labs"))
     parser.add_argument("--project")
     parser.add_argument("--report", type=Path)
-    parser.add_argument("--engine", choices=["langgraph", "sequential"], default="langgraph")
     parser.add_argument("--retries", type=int, default=1)
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--keep", action="store_true")
@@ -69,7 +68,7 @@ def main():
             docker_engine=DockerEngine(), engine_timeout=args.engine_timeout,
             auto_port=not args.fixed_port,
         )
-        report = pipeline.run(args.identifier, report_path, engine=args.engine)
+        report = pipeline.run(args.identifier, report_path)
         print(json.dumps({
             "status": report["status"],
             "cleanup": report.get("cleanup"),
