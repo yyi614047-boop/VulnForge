@@ -1,6 +1,6 @@
 # Metasploit Discovery MVP
 
-> Status: implemented as a small read-only adapter. A live Metasploit RPC instance is required for an end-to-end smoke test.
+> Status: Discovery is read-only; a separate explicitly approved check-only adapter is implemented. A live Metasploit RPC instance and running Docker lab are required for an end-to-end smoke test.
 
 ## Install
 
@@ -52,11 +52,11 @@ finally:
 
 ## Current scope
 
-- Implemented: RPC login, version query, CVE module search, module info, module options.
-- Implemented: normalized candidate and metadata models.
-- Implemented: fake-client unit tests for search, validation and inspection.
-- Not implemented: live RPC integration test, target compatibility scoring, Check, Exploit, Session lifecycle, LangGraph integration.
-- Not implemented: production deployment orchestration or container network isolation.
+- Implemented: RPC login, version query, CVE module search, module info/options, module.check and module.results.
+- Implemented: normalized candidate and metadata models, compatibility assessment, and option preparation.
+- Implemented: fake-client tests for discovery, option preparation, and approved check result polling.
+- Implemented: Docker private endpoint resolution and shared-network membership checks for a running target and Metasploit container.
+- Not implemented: live RPC integration test, exploit execution, session lifecycle, LangGraph integration, automated network provisioning/isolation, or production deployment.
 
 Module descriptions and options are untrusted external data. Discovery output is a candidate list, not proof that a module applies to a target or permission to run it.
 
@@ -92,7 +92,7 @@ This is intentionally conservative. Metasploit module rank is not target compati
 - Implemented: explicit CVE-reference comparison, product-name signal, affected-version text signal, and remote-host/port option presence.
 - Implemented: per-candidate explanations, matched/unknown/mismatch signals, and next-step guidance.
 - Implemented: CLI assessment against a reviewed reproduction spec.
-- Not implemented: fuzzy product/version matching, target fingerprinting, automated option population, module Check, exploit execution, or LangGraph routing.
+- Not implemented: fuzzy product/version matching, target fingerprinting, exploit execution, or LangGraph routing.
 
 ## Option Preparation MVP
 
