@@ -64,3 +64,25 @@ The parser is intentionally conservative. Missing fields remain empty/unknown; i
 3. Implement a dedicated Metasploit RPC transport and policy-gated non-invasive `check` operation where supported.
 4. Add exploit execution only after explicit action-level authorization, target binding, timeout/resource limits, output capture, and session cleanup are tested.
 5. Feed structured results into the independent Verifier; module success text or a session alone is not sufficient evidence.
+
+
+## Researcher and Planner integration (second milestone)
+
+Metasploit discovery is opt-in in the primary CLI workflow:
+
+```bash
+python -m app.cli CVE-2021-44228 --action research --discover-metasploit
+python -m app.cli CVE-2021-44228 --action plan --policy-file policies/local.json --discover-metasploit
+python -m app.cli CVE-2021-44228 --action run --policy-file policies/local.json --discover-metasploit
+```
+
+When enabled, the Researcher adds up to 10 inspected candidates to its bundle. Provider errors fail the research stage rather than being silently represented as an empty result. When disabled, existing workflows do not require Metasploit to be installed.
+
+The Planner receives compact candidate metadata and may propose one candidate for human review. Deterministic checks require that the candidate:
+- is present in the Researcher bundle;
+- is an inspected Metasploit `exploit` module (not an auxiliary scanner);
+- explicitly references the target CVE.
+
+The selected candidate ID and rationale are recorded in the canonical `ExecutionPlan`. The candidate list's SHA-256 fingerprint is also included in `input_fingerprints`, and is revalidated before deployment. Raw module excerpts are excluded from the Planner prompt to keep the context bounded, but remain in the Researcher report for audit.
+
+This selection is **not** a compatibility determination or execution authorization. Product/version compatibility remains unverified unless separately grounded. The selected candidate is not executed; the existing fixed reproduction lifecycle is unchanged. If no LLM is configured, candidates are surfaced for manual review and no automatic selection is made.
