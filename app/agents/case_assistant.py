@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.agent_context import agent_session, invoke_agent
 
-from app.experimental.case_knowledge import CaseKnowledge
+from app.rag.cases import CaseKnowledge
 from app.tools.registry import ToolOutput, ToolRegistry
 from app.tools.web_research import FetchParams, SearchParams, WebResearch
 from app.lab.step_executor import atomic_json
