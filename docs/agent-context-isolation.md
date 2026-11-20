@@ -61,6 +61,6 @@
 - 私有记录只在内存中保留，没有新增持久化恢复、自动摘要或 token 预算管理；16 次记录上限不是字节上限。异常调用不追加成功记录。
 - 同一运行内的相同 `agent_id` 表示同一个逻辑 Agent；本实现不提供同一 Agent 的并行分支历史合并。
 - 使用 `Pipeline.run()` 才具备完整的运行作用域和实例并发保护。直接调用底层 `graph().invoke()` 仍有节点字段边界，但不具备该入口的整次运行管理。
-- `app/lab/workflow.py`（LabWorkflow）没有模型 Agent，其内部报告对象不使用上述边界；主 CLI 使用的 Pipeline 已接入。
+- 主 CLI 和高级扩展统一使用 `app/lab/pipeline.py`；旧版 `LabWorkflow` 已移除。
 
 为新节点接入时必须声明 `state_boundary` 的读写字段；为新模型 Agent 接入时应使用 `agent_session` 和唯一的逻辑 Agent 标识调用 `invoke_agent`。

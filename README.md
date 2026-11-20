@@ -1,116 +1,88 @@
 # VulnForge
 
-A local Docker-based Agent workflow for authorized vulnerability reproduction.
-The primary CLI reads local Vulhub source documents, plans a bounded reproduction,
-runs it in an isolated Compose project, independently evaluates the observed effect,
-and records an auditable report.
+VulnForge is a staged, LangGraph-based system for authorized vulnerability reproduction in isolated local Docker environments.
 
-The primary workflow does **not** depend on RAG, BM25, embeddings, or a vector index.
-Trusted YAML knowledge/evaluation cards and their declared source files remain the
-source of execution constraints. Retrieval experiments are kept separate from the
-production path; see [experimental retrieval](docs/embedding-experiment.md).
+The project uses Markdown role instructions, LangChain with the OpenAI API for model calls, LangGraph for orchestration, Pydantic for structured validation, and a custom executor/tool layer for side effects.
 
-## Install and test
+## Architecture
 
-Python 3.11+, Docker Engine and Docker Compose v2 are required for real lab runs.
+The only primary execution architecture is the staged Pipeline:
 
-```powershell
+1. **Researcher** reads Markdown and Compose files declared by a reviewed executable knowledge card and produces source-cited evidence.
+2. **Planner** receives the research bundle and Markdown evidence, then returns a typed `DeploymentPlan`.
+3. **Plan validation** binds the plan to the trusted card, source hashes, allowed actions, dependencies, and execution budgets.
+4. **Deployer** prepares and starts the Docker environment.
+5. **Reproducer** executes the reviewed HTTP requests and scripts in the plan.
+6. **Verifier** independently evaluates response, file, and log evidence.
+7. **Cleanup** removes lab resources and writes an auditable report.
+
+LangGraph owns the StateGraph, node scheduling, state transitions, and conditional routing. There is no second source-driven agent loop.
+
+## Technology choices
+
+| Layer | Implementation |
+| --- | --- |
+| Role instructions | Markdown files in `app/agents/roles/` |
+| Model calls | LangChain + OpenAI API |
+| Runtime / orchestration | LangGraph |
+| Schemas and validation | Pydantic |
+| Tool execution | Custom `StepExecutor` and Docker/HTTP/file tools |
+| Knowledge | Reviewed YAML cards + declared Markdown/Compose sources |
+| Retrieval | Not part of the application |
+
+RAG, BM25, embedding indexes, the experimental source-driven runner, and the duplicate legacy workflow have been removed. The project does not use Claude Code or Claude Agent SDK.
+
+## Knowledge cards
+
+Executable cards belong in `knowledge/cards/`; their `sources` and `environment` paths are resolved relative to that directory. See `app/lab/knowledge.py` for the authoritative Pydantic schema.
+
+The upstream Vulhub corpus under `knowledge/vulhub/` contains source material, not automatically trusted execution permissions. Files in `knowledge/evaluation-cards/` are documentary review artifacts, not executable Pipeline cards.
+
+## Install
+
+Python 3.11+, Docker Engine, and Docker Compose v2 are required.
+
+```bash
 python -m venv .venv
 python -m pip install -e ".[dev]"
+```
+
+Configure the model through environment variables:
+
+```bash
+export OPENAI_API_KEY="..."
+export PLANNER_MODEL="gpt-4o"
+# Optional for an OpenAI-compatible endpoint:
+export OPENAI_BASE_URL="https://..."
+```
+
+On PowerShell use `$env:OPENAI_API_KEY="..."` and `$env:PLANNER_MODEL="gpt-4o"`.
+
+## CLI
+
+```bash
+python -m app.lab.cli --action engine --check-only
+python -m app.lab.cli CVE-2021-25646 --action research
+python -m app.lab.cli CVE-2021-25646 --action plan
+python -m app.lab.cli CVE-2021-25646 --action run
+python -m app.lab.cli CVE-2021-25646 --engine sequential
+```
+
+Use `--knowledge` to point to a directory containing reviewed executable cards. Use a new report path for each run. The default report location is `reports/<project>.json`.
+
+## Safety boundaries
+
+- Markdown and Compose documents are untrusted evidence, not policy.
+- The model cannot introduce arbitrary tools, targets, probes, assertions, or shell commands.
+- The plan must match the trusted card, content hashes, and fixed lifecycle before execution.
+- Docker and HTTP operations are bounded and constrained to the local lab.
+- A separate Verifier evaluates observed evidence; the Planner and Reproducer cannot declare success.
+- Cleanup is part of the Pipeline lifecycle.
+
+## Development
+
+```bash
 python -m pytest
 ```
 
-## Run a Vulhub experiment
-
-```powershell
-python -m app.lab.cli CVE-2021-25646
-python -m app.lab.cli CVE-2021-25646 --action plan
-python -m app.lab.cli CVE-2021-25646 --timeout 300 --report reports/druid-001.json
-```
-
-A bare CVE identifier starts a complete experiment. The source researcher reads the
-matching local Vulhub environment's Compose and Markdown files directly. The planner
-creates a bounded, source-cited plan. The runner snapshots the environment into
-`.labs`, binds published ports to loopback, and starts the Docker Compose project.
-A LangGraph agent/tool loop then chooses the next allowed HTTP request, container
-command, source read, log inspection, finish, or abort action based on actual
-observations. Finishing submits the attempt to a separate evaluator; it does not
-declare success. The evaluator compares the observed behavior with a separate
-reviewed evaluation card. Missing or ambiguous evidence yields `inconclusive`.
-
-Each report has a sibling `<report-stem>.trace.jsonl` containing ordered model calls,
-tool inputs/results/errors, agent decisions and cleanup events. `--max-steps` limits
-agent decisions (default 30). `--engine sequential` runs the same decision/tool loop
-without LangGraph.
-
-## Core CLI
-
-| Action | Purpose |
-| --- | --- |
-| `engine` | Check or start Docker |
-| `search` | Exact keyword/CVE search across local Vulhub environment names and Markdown |
-| `research` | Read the matched environment's complete Compose and Markdown sources |
-| `plan` | Generate and validate a source-cited reproduction plan |
-| `run` | Execute, independently evaluate, clean up and write a report |
-| `inspect` | Pretty-print an existing JSON report |
-
-Examples:
-
-```powershell
-python -m app.lab.cli CVE-2021-25646 --action search
-python -m app.lab.cli CVE-2021-25646 --action research
-python -m app.lab.cli CVE-2021-25646 --action research --model
-python -m app.lab.cli CVE-2021-25646 --action plan
-python -m app.lab.cli CVE-2021-25646 --engine sequential
-python -m app.lab.cli inspect reports/run-001.json
-```
-
-Model features require `OPENAI_API_KEY` and `PLANNER_MODEL`; optionally set
-`OPENAI_BASE_URL`. The existing `LLM_API_KEY`, `LLM_BASE_URL`, and `LLM_MODEL`
-aliases are also supported by the runner. Process environment variables take
-precedence over the project's `.env` settings where applicable.
-
-The CLI checks Docker and attempts local engine startup when needed. It selects an
-available loopback port if the card port cannot bind; use `--fixed-port` to require
-the specified port. Use a new report name each run. Script exit code zero is
-insufficient: independent response/file assertions must pass. Containers, networks
-and project volumes are cleaned up unless `run` uses `--keep`.
-
-## Main architecture
-
-- `app/lab/vulhub_researcher.py`: direct local source reading and citation checking
-- `app/lab/vulhub_run.py`: source planning, bounded reproduction loop, independent evaluation and cleanup
-- `app/lab/knowledge.py`: typed trusted knowledge cards and local knowledge loading
-- `app/lab/planning.py`, `step_executor.py`: constrained plans, policy checks and execution
-- `app/lab/hashing.py`: content hashes used to bind plans to their source inputs
-- `app/tools/`: Docker, filesystem, web and Vulhub source tools
-- `app/rag/`: experimental retrieval code only; not imported by the primary CLI/runtime
-
-The card-based `Pipeline` API remains available for staged execution. Both execution
-paths use explicit evidence, bounded operations and cleanup. See
-[architecture](docs/architecture.md), [autonomous workflow](docs/autonomous-workflow.md),
-[script tools](docs/script-tools.md), and the [Chinese code-reading guide](docs/code-reading-guide.md).
-
-## Other capabilities
-
-Authoring, recovery, comparison, batch queues, case assistant and documentary review
-remain available as Python APIs and integration examples. Their availability does
-not make them part of the minimal primary CLI path.
-
-## Integration checks
-
-```powershell
-python -m examples.authoring_smoke
-python -m examples.advanced_smoke
-```
-
-These use fixed model responses and real Docker to test orchestration, not live-model
-quality. Real model quality and real CVE package behavior still require separate
-validation. Web evidence is not automatically trusted execution configuration.
-
-## Extract Vulhub candidates
-
-The optional extractor writes schema-validated candidate YAML cards and copies
-source environments into a separate directory. It does not add candidates to the
-production knowledge directory automatically. Review source citations, Compose
-assets, ports, reproduction steps and evidence before accepting a candidate.
+Model-backed and Docker-backed integration tests require credentials and local services. A passing unit suite does not establish that every upstream Vulhub environment can be reproduced.

@@ -1,4 +1,4 @@
-"""OpenAI-compatible chat model configuration shared by authoring utilities."""
+"""OpenAI-compatible chat model configuration shared by Pipeline agents."""
 import os
 
 
