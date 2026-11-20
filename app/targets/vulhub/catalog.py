@@ -1,11 +1,12 @@
 """Filesystem adapter for reviewed reproduction specifications."""
+from hashlib import sha256
 from pathlib import Path
 import re
 
 import yaml
 
 from app.domain.reproduction import ReproductionSpec
-from app.domain.targets import EnvironmentSpec, TargetSource, TargetSpec
+from app.domain.targets import EnvironmentSpec, TargetSource, TargetSpec, VerificationAssertion
 
 
 class TargetCatalog:
@@ -43,42 +44,63 @@ class TargetCatalog:
         if not isinstance(services, dict) or not services:
             raise ValueError("Compose file must declare at least one service")
 
-        referenced_services = {spec.service}
-        referenced_services.update(script.service for script in [*spec.initialization, *spec.scripts])
-        referenced_services.update(item.service for item in spec.file_evidence)
-        referenced_services.update(item.service for item in spec.version_probes)
-        if not referenced_services <= set(services):
-            raise ValueError("Reproduction spec references a service missing from Compose")
-
         published_ports = {}
         for service, config in services.items():
             ports = []
             for entry in config.get("ports", []) if isinstance(config, dict) else []:
                 if isinstance(entry, str):
                     parts = entry.split("/", 1)[0].split(":")
-                    if len(parts) >= 2 and parts[-2].isdigit():
+                    if len(parts) >= 3 and parts[-2].isdigit():
+                        if parts[-3] != "127.0.0.1":
+                            raise ValueError("Published target ports must bind explicitly to 127.0.0.1")
                         ports.append(int(parts[-2]))
+                    elif len(parts) == 2 and parts[-2].isdigit():
+                        raise ValueError("Published target ports without an explicit loopback IP are not allowed")
                 elif isinstance(entry, dict) and str(entry.get("published", "")).isdigit():
+                    if entry.get("host_ip") != "127.0.0.1":
+                        raise ValueError("Published target ports must bind explicitly to 127.0.0.1")
                     ports.append(int(entry["published"]))
             if ports:
                 published_ports[str(service)] = sorted(set(ports))
-        published_ports.setdefault(spec.service, [])
-        published_ports[spec.service] = sorted(set([*published_ports[spec.service], spec.port]))
 
         source_refs = []
-        for index, source in enumerate(spec.sources):
+        local_sources = {compose_path}
+        for source in spec.sources:
             if source.startswith("http://"):
                 raise ValueError("Target source URLs must use HTTPS")
             if source.startswith("https://"):
-                source_refs.append(TargetSource(source_id=f"source-{index+1}", url=source))
-            else:
-                source_refs.append(TargetSource(source_id=f"source-{index+1}", path=source))
-        source_refs.append(TargetSource(
-            source_id="compose",
-            path=compose_path.relative_to(self.root).as_posix(),
-            media_type="application/yaml",
-        ))
+                source_refs.append(TargetSource(source_id=f"source-{len(source_refs)+1}", url=source))
+                continue
+            path = (self.root / source).resolve()
+            if not path.is_relative_to(self.root) or not path.is_file():
+                raise ValueError(f"Declared target source is missing or outside catalog: {source}")
+            local_sources.add(path)
+        for script in [*spec.initialization, *spec.scripts]:
+            path = (self.root / script.source).resolve()
+            if not path.is_relative_to(self.root) or not path.is_file():
+                raise ValueError(f"Script source is missing or outside catalog: {script.source}")
+            local_sources.add(path)
+        for path in sorted(local_sources):
+            relative = path.relative_to(self.root).as_posix()
+            media_type = "application/yaml" if path == compose_path else "text/markdown" if path.suffix.lower() == ".md" else "application/octet-stream"
+            source_refs.append(TargetSource(
+                source_id=f"source-{len(source_refs)+1}", path=relative, media_type=media_type,
+                sha256=sha256(path.read_bytes()).hexdigest(),
+            ))
         entrypoints = sorted({script.source for script in [*spec.initialization, *spec.scripts]})
+        assertions = []
+        for probe in spec.verification_requests:
+            assertions.append(VerificationAssertion(assertion_id=f"{probe.id}-status", evidence_kind="http",
+                source=f"{probe.path}#status", operator="equals", expected_value=str(probe.expected_status)))
+            if probe.body_contains:
+                assertions.append(VerificationAssertion(assertion_id=f"{probe.id}-body", evidence_kind="http",
+                    source=f"{probe.path}#body", operator="contains", expected_value=probe.body_contains))
+            if probe.log_contains:
+                assertions.append(VerificationAssertion(assertion_id=f"{probe.id}-log", evidence_kind="log",
+                    source="compose_logs", operator="contains", expected_value=probe.log_contains))
+        for rule in spec.file_evidence:
+            assertions.append(VerificationAssertion(assertion_id=rule.id, evidence_kind="file",
+                source=rule.path, operator="contains", expected_value=rule.contains))
         vulnerability = re.search(r"(?:CVE|CNVD)-\d{4}-\d+", spec.id, re.I)
 
         return TargetSpec(
@@ -97,6 +119,7 @@ class TargetCatalog:
                 ),
             ),
             reproduction_entrypoints=entrypoints,
+            verification_assertions=assertions,
         )
 
 

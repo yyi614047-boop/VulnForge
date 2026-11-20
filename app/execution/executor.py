@@ -20,6 +20,8 @@ from app.tools.registry import ToolTimeoutError
 from app.tools.builtin.filesystem import WorkspaceFiles, WriteParams, local_path, file_hash
 from app.environments.docker.manager import environment_assets
 from app.execution.artifacts import collect_assets
+from app.execution.verifier import EvidenceVerifier
+from app.domain.results import Evidence
 from app.domain.plans import ExecutionPlan
 from app.domain.policies import ExecutionPolicy
 from app.domain.targets import TargetSpec
@@ -286,20 +288,34 @@ class StepExecutor:
         if step.action == "down" and not self.started:
             return {"cleanup": "not_needed"}
         if step.action == "verify":
-            probes = [*self.card.reproduction, *self.card.verification_requests]
-            result = verify(probes, self.observations, self.logs) if probes else {"status": "success", "checks": [], "reason": "Independent file evidence"}
-            for rule in self.card.file_evidence:
-                evidence = self.file_observations.get(rule.id)
-                if not evidence or evidence.get("service") != rule.service or evidence.get("path") != rule.path:
-                    result.update(status="inconclusive", reason="Missing or mismatched target file evidence")
-                    continue
-                matched = evidence.get("regular") is True and rule.contains in evidence.get("body", "")
-                result["checks"].append({"probe": rule.id, "field": "target_file_contains", "expected": rule.contains, "matched": matched})
-                if not matched:
-                    if evidence.get("truncated") or result["status"] == "inconclusive":
-                        result.update(status="inconclusive", reason="File evidence is incomplete")
-                    else:
-                        result.update(status="not_reproduced", reason="Independent file assertion did not match")
+            if self.target_spec.verification_assertions:
+                evidence_items = []
+                verification_probes = {probe.id: probe for probe in self.card.verification_requests}
+                for observation in self.observations:
+                    probe = verification_probes.get(observation.get("probe_id"))
+                    if probe is None:
+                        continue
+                    if observation.get("status") is not None:
+                        evidence_items.append(Evidence(evidence_id=f"{probe.id}-status", kind="http",
+                            source=f"{probe.path}#status", observed_value=observation["status"], summary="HTTP response status"))
+                    if observation.get("body") is not None:
+                        evidence_items.append(Evidence(evidence_id=f"{probe.id}-body", kind="http",
+                            source=f"{probe.path}#body", observed_value=observation["body"], summary="HTTP response body"))
+                for rule in self.card.file_evidence:
+                    observed = self.file_observations.get(rule.id)
+                    if observed and observed.get("regular") is True and not observed.get("truncated"):
+                        evidence_items.append(Evidence(evidence_id=rule.id, kind="file", source=rule.path,
+                            observed_value=observed.get("body", ""), summary="Target file evidence"))
+                if self.logs is not None:
+                    evidence_items.append(Evidence(evidence_id="compose-logs", kind="log", source="compose_logs",
+                        observed_value=self.logs, summary="Docker Compose logs"))
+                outcome = EvidenceVerifier().verify(self.target_spec, evidence_items, self.execution_policy)
+                result = {"status": outcome.status, "reason": outcome.summary,
+                          "checks": [item.model_dump(mode="json") for item in outcome.checks]}
+            else:
+                probes = list(self.card.reproduction)
+                result = verify(probes, self.observations, self.logs) if probes else {
+                    "status": "inconclusive", "checks": [], "reason": "No independent verification assertions were declared"}
             self.report["verification"] = result
             if self.report["status"] == "pending":
                 self.report["status"] = result["status"]

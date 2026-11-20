@@ -12,7 +12,7 @@ def reviewed_target():
     return TargetSpec(
         target_id="demo:CVE-2024-12345", title="Demo target", product="demo",
         vulnerability_id="CVE-2024-12345",
-        sources=[TargetSource(source_id="readme", path="demo/README.md")],
+        sources=[TargetSource(source_id="readme", path="demo/README.md", sha256="a" * 64)],
         environment=EnvironmentSpec(compose_file="demo/docker-compose.yml", services=["web"], published_ports={"web": [8080]}),
         verification_assertions=[VerificationAssertion(assertion_id="vuln-response", evidence_kind="http",
             source="/vulnerable", operator="contains", expected_value="vulnerable")],

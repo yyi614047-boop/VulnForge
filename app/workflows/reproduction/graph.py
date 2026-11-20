@@ -34,6 +34,8 @@ class Pipeline:
         self.docker_engine, self.engine_timeout = docker_engine, engine_timeout
         self.auto_port, self.port_selection = auto_port, None
         self.execution_policy = execution_policy
+        if execution_policy is not None and auto_port:
+            raise ValueError("Policy-bound runs require a fixed, fingerprinted target port; disable auto_port")
 
     @state_boundary(reads=['identifier'], writes=['bundle', 'status', 'error'])
     def research(self, state):
@@ -86,11 +88,6 @@ class Pipeline:
             return {"status": "policy_denied", "error": str(exc)}
         engine = {}
         try:
-            if self.docker_engine is not None:
-                engine = self.docker_engine.ensure(EngineParams(timeout=self.engine_timeout)).evidence
-                if not engine["ready"]:
-                    return {"status": "environment_error", "engine": engine,
-                            "error": engine.get("error", engine.get("last_probe_error", "Docker engine unavailable"))}
             self.executor.open(
                 self.planner_plan(state), state["bundle"],
                 retries=self.retries, timeout=self.timeout, keep=self.keep,
@@ -99,6 +96,11 @@ class Pipeline:
                 reproduction_spec=ReproductionSpec.model_validate(state["reproduction_spec"]),
             )
             self.active = True
+            if self.docker_engine is not None:
+                engine = self.docker_engine.ensure(EngineParams(timeout=self.engine_timeout)).evidence
+                if not engine["ready"]:
+                    return {"status": "environment_error", "engine": engine,
+                            "error": engine.get("error", engine.get("last_probe_error", "Docker engine unavailable"))}
             if engine:
                 self.executor.report["engine"] = engine
                 self.executor.save()

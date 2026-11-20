@@ -71,7 +71,7 @@ class ExecutionPolicy(DomainModel):
             raise PermissionError("Action retry count exceeds execution policy")
         if action == "build" and not self.allow_image_build:
             raise PermissionError("Image builds are disabled by execution policy")
-        if action == "script" and not self.allow_target_scripts:
-            raise PermissionError("Target scripts are disabled by execution policy")
+        if action in {"stage_artifacts", "initialize", "script"} and not self.allow_target_scripts:
+            raise PermissionError("Target scripts and artifact staging are disabled by execution policy")
         if action == "keep" and not self.allow_keep_environment:
             raise PermissionError("Keeping the environment is disabled by execution policy")

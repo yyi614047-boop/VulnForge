@@ -219,10 +219,11 @@ No mass deletion or main-branch merge should happen before the relevant migratio
 
 ### Pending before calling the migration complete
 
-- Wire the new request/target/policy/plan/report contracts through the actual CLI, LangGraph workflow, and executor.
+- Replace the remaining legacy `DeploymentPlan` planner/executor surface with `ExecutionPlan` as the single plan contract; the current adapter validates both but dispatch still consumes the legacy plan.
 - Replace the legacy YAML Card/KnowledgeBase dependency; remove `app/lab/knowledge.py` only after all call sites are migrated.
 - Move workflow, agent, execution, tool, and Docker environment implementations into the target package layout without duplicate implementations.
-- Add independent verifier interface and security tests; keep Metasploit optional pending a separate design decision.
+- Add container egress isolation so `network_scope` constrains Docker pull/build and container traffic, not only loopback HTTP probes.
+- Decide whether Metasploit is an optional check provider or corroborating verifier; do not make it mandatory before the safety contract is defined.
 - Run the CI suite and Docker-backed integration path, inspect the reports, and resolve all failures.
 
  
@@ -235,6 +236,16 @@ No mass deletion or main-branch merge should happen before the relevant migratio
 
 ### Still required
 
-- Bind `TargetSpec`, `ReproductionSpec`, `ExecutionPolicy`, and `ExecutionPlan` together on the actual Pipeline execution path; fail closed if the target fingerprint or policy does not match.
-- Replace the current card-shaped Pipeline planner/executor contract with the domain plan contract.
-- Validate and run a representative local Vulhub target through Docker, including cleanup and independent verification.
+- Complete the single-plan migration: the current Pipeline adapts the planner's legacy `DeploymentPlan` into `ExecutionPlan`, and the executor revalidates the adapter output before opening the lab, but dispatch still runs the legacy plan object.
+- Run a representative, explicitly reviewed local reproduction through Docker, including cleanup and independent verification; this repository currently contains no reviewed reproduction YAML fixture, so an end-to-end run cannot be honestly claimed.
+
+
+### Policy and verification integration update
+
+- Added `policy-preview` to emit target and reproduction fingerprints plus a review-only JSON policy template; `run` requires an explicit policy file.
+- Bound `TargetSpec`, `ReproductionSpec`, `ExecutionPolicy`, and the adapted `ExecutionPlan` in the LangGraph planning stage.
+- The executor re-derives the target and reproduction fingerprints from the current catalog before opening the lab, then revalidates every planned action and retry budget.
+- Target source files and Compose inputs are content-hashed; policy approval rejects unpinned remote sources and non-loopback published ports.
+- Recovery retries now require the action to be explicitly marked retryable in policy and remain within the policy recovery budget.
+- The provider-neutral `EvidenceVerifier` is wired into the execution verification phase for reviewed HTTP, file, and log assertions.
+- Policy-bound execution uses fixed target ports because automatic port rewriting would invalidate the approved fingerprint.

@@ -73,6 +73,8 @@ def main():
         catalog = TargetCatalog(args.specs)
         spec = catalog.get(args.identifier)
         target = catalog.to_target_spec(spec)
+        if any(source.sha256 is None for source in target.sources):
+            parser.error("Policy preview requires local, content-hashed sources; pin remote sources before approval")
         actions = {"pull", "up", "status", "health", "logs", "verify", "down"}
         if spec.reproduction:
             actions.add("http")
@@ -88,12 +90,17 @@ def main():
             actions.update({"stage_artifacts", "script"})
         if target.environment.build_required:
             actions.add("build")
+        retryable_actions = {"pull", "status", "health", "logs", "down"}
+        if any(probe.retry_safe for probe in spec.reproduction):
+            retryable_actions.add("http")
+        if args.keep:
+            actions.add("keep")
         template = {
             "policy_id": f"reviewed-{spec.id}",
             "approved_target_hashes": {target.target_id: target.fingerprint()},
             "approved_reproduction_hashes": {spec.id: spec.fingerprint()},
             "allowed_actions": sorted(actions),
-            "retryable_actions": ["pull"],
+            "retryable_actions": sorted(retryable_actions),
             "allowed_services": target.environment.services,
             "allowed_ports": sorted({p for ports in target.environment.published_ports.values() for p in ports}),
             "network_scope": "loopback_only",
@@ -103,7 +110,7 @@ def main():
             "max_recovery_actions": 1,
             "allow_image_build": False,
             "allow_target_scripts": False,
-            "allow_keep_environment": False,
+            "allow_keep_environment": bool(args.keep),
         }
         print(json.dumps({
             "target_spec": target.model_dump(mode="json"),
@@ -142,7 +149,7 @@ def main():
             args.specs, args.workspace, project, llm=model,
             retries=args.retries, timeout=args.timeout, keep=args.keep,
             docker_engine=DockerEngine(), engine_timeout=args.engine_timeout,
-            auto_port=not args.fixed_port, execution_policy=policy,
+            auto_port=False, execution_policy=policy,
         )
         report = pipeline.run(args.identifier, report_path)
         print(json.dumps({
