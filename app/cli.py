@@ -19,7 +19,7 @@ from app.environments.docker.engine import DockerEngine
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("identifier", nargs="?", help="Reviewed reproduction specification identifier")
-    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate", "policy-preview", "metasploit-search", "metasploit-assess", "metasploit-prepare"], default="run")
+    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate", "policy-preview", "metasploit-search", "metasploit-assess", "metasploit-prepare", "metasploit-check"], default="run")
     parser.add_argument("--targets", type=Path, default=Path("targets/vulhub"),
                         help="Root of the retained Vulhub target corpus")
     parser.add_argument("--query", help="Search query for target-search")
@@ -27,6 +27,12 @@ def _parser():
     parser.add_argument("--candidate-limit", type=int, default=1, help="Maximum Metasploit candidates to inspect")
     parser.add_argument("--target-host", help="Explicit reachable target IP/hostname for Metasploit option preparation")
     parser.add_argument("--target-port", type=int, help="Target port (defaults to the reviewed reproduction spec port)")
+    parser.add_argument("--module-type", choices=["exploit", "auxiliary"], help="Exact Metasploit module type for check")
+    parser.add_argument("--module-name", help="Exact Metasploit module path (without the type prefix)")
+    parser.add_argument("--metasploit-network", help="Existing Docker network shared by target and Metasploit")
+    parser.add_argument("--metasploit-container", help="Name or ID of the running Metasploit container")
+    parser.add_argument("--approval-file", type=Path, help="Explicit JSON approval binding module, target, and options")
+    parser.add_argument("--module-options-file", type=Path, help="Optional JSON object of additional declared module options")
     parser.add_argument("--environment", help="Relative target directory for target-inspect")
     parser.add_argument("--request-file", type=Path, help="JSON ReproductionRequest for request-validate")
     parser.add_argument("--policy-file", type=Path, help="Reviewed JSON ExecutionPolicy required for run")
@@ -107,6 +113,84 @@ def main():
                 "target_id": target.target_id,
                 "candidate_count": len(candidates),
                 "results": results,
+            }, ensure_ascii=False, indent=2))
+        finally:
+            client.close()
+        return
+
+
+    if args.action == "metasploit-check":
+        required = {
+            "--project": args.project,
+            "--module-type": args.module_type,
+            "--module-name": args.module_name,
+            "--metasploit-network": args.metasploit_network,
+            "--metasploit-container": args.metasploit_container,
+            "--approval-file": args.approval_file,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            parser.error("--action metasploit-check requires " + ", ".join(missing))
+        if not args.identifier:
+            parser.error("--action metasploit-check requires a reproduction-spec identifier")
+        catalog = TargetCatalog(args.specs)
+        spec = catalog.get(args.identifier)
+        target = catalog.to_target_spec(spec)
+        from app.environments.docker.manager import DockerLab
+        from app.integrations.metasploit import MetasploitRPCClient, MetasploitDiscovery, prepare_module_options
+        from app.integrations.metasploit.execution import MetasploitCheckAdapter, MetasploitCheckApproval, options_fingerprint
+        url = os.environ.get("METASPLOIT_RPC_URL", "http://127.0.0.1:55553/api/")
+        username = os.environ.get("METASPLOIT_RPC_USERNAME")
+        password = os.environ.get("METASPLOIT_RPC_PASSWORD")
+        if not username or not password:
+            parser.error("Set METASPLOIT_RPC_USERNAME and METASPLOIT_RPC_PASSWORD")
+        project_dir = args.workspace / args.project
+        compose_path = project_dir / "compose.json"
+        if not compose_path.is_file():
+            parser.error(f"Prepared lab does not exist: {compose_path}; run the reviewed Docker lab first")
+        lab = DockerLab(compose_path, args.project)
+        endpoint = lab.resolve_target_endpoint(
+            spec.service, spec.port, network_name=args.metasploit_network,
+            metasploit_container=args.metasploit_container,
+        )
+        client = MetasploitRPCClient(url, username, password)
+        try:
+            discovery = MetasploitDiscovery(client)
+            cve = args.cve or target.vulnerability_id or ""
+            candidates = discovery.search_cve(cve, limit=100)
+            candidate = next((item for item in candidates
+                if item.module_type == args.module_type and item.module_name == args.module_name), None)
+            if candidate is None:
+                parser.error("The exact requested module was not found in the CVE search results")
+            metadata = discovery.inspect(candidate)
+            overrides = json.loads(args.module_options_file.read_text(encoding="utf-8")) if args.module_options_file else {}
+            if not isinstance(overrides, dict):
+                parser.error("--module-options-file must contain a JSON object")
+            prepared = prepare_module_options(
+                candidate, metadata, target_host=endpoint["host"],
+                target_port=endpoint["port"], overrides=overrides,
+            )
+            if not prepared.ready:
+                print(json.dumps({
+                    "status": "blocked", "reason": "Required Metasploit options are missing",
+                    "missing_required": prepared.missing_required,
+                    "candidate_id": candidate.candidate_id, "target_id": target.target_id,
+                    "execution_performed": False,
+                }, ensure_ascii=False, indent=2))
+                raise SystemExit(2)
+            approval = MetasploitCheckApproval.model_validate(
+                json.loads(args.approval_file.read_text(encoding="utf-8"))
+            )
+            result = MetasploitCheckAdapter(client).check(
+                candidate, prepared, target_id=target.target_id, approval=approval,
+            )
+            print(json.dumps({
+                "status": result["job_status"], "check_code": result["check_code"],
+                "message": result["message"], "candidate_id": result["candidate_id"],
+                "target_id": result["target_id"], "target_endpoint": endpoint,
+                "policy_id": result["policy_id"],
+                "options_sha256": options_fingerprint(prepared.options),
+                "exploit_executed": False, "result": result,
             }, ensure_ascii=False, indent=2))
         finally:
             client.close()
