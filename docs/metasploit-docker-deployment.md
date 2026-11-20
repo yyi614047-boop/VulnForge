@@ -126,7 +126,7 @@ The Agent may propose a candidate and parameters. Deterministic Python code must
 | Phase | Capability | Acceptance criteria |
 | --- | --- | --- |
 | 0 | Deployment and RPC health check | Private RPC connectivity, TLS/auth checks, version reporting, no public exposure |
-| 1 | Read-only CVE/module discovery | Search results normalized with provenance; no module execution capability available |
+| 1 | Read-only CVE/module discovery | **Implemented MVP:** RPC login, CVE search, normalized candidates, module info/options inspection; fake-client unit tests. Live RPC smoke test remains pending |
 | 2 | Module inspection | Metadata, target constraints, required options and check support are parsed and validated |
 | 3 | Policy-gated check | Explicit target/option authorization, timeout, side-effect documentation, auditable output |
 | 4 | Policy-gated exploit execution | Explicit approval, isolated attack network, controlled payload/session lifecycle, evidence verification and cleanup |
@@ -177,7 +177,7 @@ The exact URL path, TLS termination, and RPC listener configuration must match t
 This deployment proposal complements [Architecture v2](architecture-v2.md). The implementation should follow the existing principle: Agents propose; domain policy and deterministic Python code authorize and execute.
 
 
-## 11. Implementation philosophy: incremental MVP first
+## 11. Current implementation progress\n\nThe first read-only Discovery MVP is now present in `app/integrations/metasploit/`: RPC client, CVE discovery, normalized candidate/metadata models, CLI search command, and focused fake-client tests. See [Metasploit Discovery MVP](metasploit-discovery-mvp.md) for setup and usage. A live RPC smoke test and LangGraph integration are still pending.\n\n## 12. Implementation philosophy: incremental MVP first
 
 **Working principle: implement a small, runnable slice first; improve hardening and completeness after the functionality works. Avoid designing the entire platform before the first end-to-end integration exists.**
 
