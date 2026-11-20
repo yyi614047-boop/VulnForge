@@ -33,7 +33,7 @@ def compare_versions(knowledge, fixed_knowledge, identifier, fixed_identifier, w
     snapshot(Path(knowledge), original)
     snapshot(Path(fixed_knowledge), patched)
     knowledge, fixed_knowledge = original, patched
-    kb, fixed_kb = TargetCatalog(knowledge), KnowledgeBase(fixed_knowledge)
+    kb, fixed_kb = TargetCatalog(knowledge), TargetCatalog(fixed_knowledge)
     comparable((kb, kb.get(identifier)), (fixed_kb, fixed_kb.get(fixed_identifier)))
     report = {"status": "running", "arms": {}}
     atomic_json(report_path, report)

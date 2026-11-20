@@ -36,7 +36,7 @@ def prepare_port(knowledge, workspace, identifier, *, chooser=choose_port):
         return Path(knowledge), {"requested": card.port, "selected": selected, "changed": False}
     root = Path(workspace).resolve() / "port-inputs" / uuid4().hex[:12]
     snapshot(Path(knowledge), root)
-    clone = KnowledgeBase(root)
+    clone = TargetCatalog(root)
     source = clone.environment(card)
     config = load_compose(source)
     service = config["services"][card.service]
