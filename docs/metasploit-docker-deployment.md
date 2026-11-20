@@ -1,6 +1,6 @@
 # Metasploit and Docker Deployment Architecture
 
-> Status: **partially implemented**. The read-only RPC Discovery and Target Compatibility MVPs exist. The container deployment boundary, Docker network isolation, Check/Exploit integration, and production deployment remain design proposals or future work.
+> Status: **partially implemented**. Read-only RPC Discovery, Target Compatibility, Option Preparation, Docker endpoint resolution, and an explicitly approved check-only adapter are implemented. Automatic network provisioning/isolation, LangGraph integration, exploit execution, session management, and production deployment remain future work.
 
 ## 1. Decision
 
@@ -90,7 +90,7 @@ Proposed responsibilities:
 - `module_inspector.py`: module metadata, supported targets, required/optional options, check capability and side-effect metadata.
 - `models.py`: `PoCCandidate`, module metadata and normalized discovery results.
 
-The adapter should initially implement read-only discovery and inspection. Add check and exploit execution as separate capabilities only after their authorization contracts and integration tests exist.
+The adapter implements read-only discovery/inspection plus a separate explicitly approved module.check capability. Exploit execution remains a separate, unimplemented capability.
 
 ### RPC security requirements
 
@@ -128,7 +128,7 @@ The Agent may propose a candidate and parameters. Deterministic Python code must
 | 0 | Deployment and RPC health check | Private RPC connectivity, TLS/auth checks, version reporting, no public exposure |
 | 1 | Read-only CVE/module discovery | **Implemented MVP:** RPC login, CVE search, normalized candidates, module info/options inspection; fake-client unit tests. Live RPC smoke test remains pending |
 | 2 | Module inspection and option preparation | **Implemented MVP:** inspect metadata/options, preserve defaults, fill explicit target host/port, report missing required options; automatic Docker endpoint resolution remains pending |
-| 3 | Policy-gated check | Explicit target/option authorization, timeout, side-effect documentation, auditable output |
+| 3 | Policy-gated check | **Implemented MVP:** exact candidate/target/host/port/options-hash approval, private shared-network endpoint resolution, bounded module.check polling; independent execution-policy integration and automated network isolation remain pending |
 | 4 | Policy-gated exploit execution | Explicit approval, isolated attack network, controlled payload/session lifecycle, evidence verification and cleanup |
 | 5 | Isolation hardening | Security tests for cross-network reachability, egress restrictions, credential exposure and Docker API permissions |
 
@@ -235,3 +235,16 @@ This remains read-only. It does not call Metasploit Check or execute modules. Th
 ## Current delivery: Option Preparation MVP
 
 A small option preparation helper is implemented in `app/integrations/metasploit/options.py`, with a `metasploit-prepare` CLI action. It inspects the first CVE search result by default, preserves module defaults, fills only declared target host/port options from an explicitly supplied reachable host and the reviewed reproduction port, and reports any remaining required options. It does not guess container IP addresses or execute modules. See [Metasploit Discovery MVP](metasploit-discovery-mvp.md) for the command and Python API.
+
+
+## Current delivery: Docker Target Resolution and Metasploit Check MVP
+
+The Docker manager can resolve a reviewed service's private IPv4 address and internal TCP port only when:
+- the service is declared in the prepared Compose project;
+- the reviewed host port is explicitly published on 127.0.0.1;
+- the target container is running and has exactly one matching port binding;
+- the target and configured Metasploit container are both running and attached to the explicitly selected Docker network.
+
+The CLI exposes this as docker-target-resolve. The Metasploit check adapter exposes only module.check and module.results; there is no exploit execution method. Before the RPC call, an explicit approval document must match the candidate ID, reviewed target ID, resolved private address, internal port, and SHA-256 fingerprint of the complete option mapping. The adapter accepts only exploit and auxiliary module types and only private, non-loopback IPv4 addresses.
+
+This is an incremental integration slice, not a complete sandbox: network creation and egress isolation are not automated, and the operator must attach the Metasploit container to a dedicated lab attack network. The adapter does not prove that the RPC container can reach the target merely because both are attached to the same Docker network; the actual check result remains the runtime observation. Exploit execution and session handling remain out of scope.
