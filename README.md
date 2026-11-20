@@ -6,7 +6,7 @@ The project uses Markdown role instructions, LangChain with the OpenAI API for m
 
 ## Product design and PoC sources
 
-- **Metasploit Framework — primary PoC source and planned execution backend:** search CVE references, inspect existing modules, review options and target constraints, and later execute approved modules through a controlled RPC adapter.
+- **Metasploit Framework — primary PoC source:** read-only CVE module discovery and module metadata inspection are implemented behind `MetasploitDiscovery`; controlled RPC execution remains planned.
 - **GitHub / Exploit-DB / upstream repositories — secondary PoC sources:** find existing standalone scripts when no suitable Metasploit module exists.
 - **Vulhub — primary vulnerable-environment source:** provide Docker Compose environments, version/configuration context, and reproduction documentation. Some entries include native PoCs, but Vulhub is not assumed to provide one for every CVE.
 
@@ -20,7 +20,7 @@ The only primary execution architecture is the staged Pipeline:
 2. **Planner** receives the research bundle and Markdown evidence, then returns a typed domain `ExecutionPlan`.
 3. **Plan validation** binds the plan to the trusted reproduction specification, source hashes, allowed actions, dependencies, and execution budgets.
 4. **Deployer** prepares and starts the Docker environment.
-5. **Reproducer** executes the approved existing PoC through its backend adapter (planned: Metasploit RPC as the primary exploit backend; constrained script/HTTP adapters for secondary PoCs).
+5. **Reproducer** executes the approved existing PoC through its backend adapter. Metasploit discovery/inspection exists as a separate read-only capability; Metasploit RPC exploit execution is not yet connected to this path.
 6. **Bounded Recovery** may ask the Recovery Agent for one additional retry of the exact same step after a typed transient failure. The retry budget is global to one Pipeline run.
 7. **Verifier** independently evaluates response, file, and log evidence.
 8. **Cleanup** removes lab resources and writes an auditable report.
@@ -41,7 +41,7 @@ LangGraph owns the StateGraph, node scheduling, state transitions, and condition
 | Reproduction input | Reviewed YAML `ReproductionSpec` files in `reproductions/` |
 | Retrieval | Not part of the application |
 
-RAG, BM25, embedding indexes, the experimental source-driven runner, and the duplicate legacy workflow have been removed. The project does not use Claude Code or Claude Agent SDK.
+RAG, BM25, embedding indexes, the experimental source-driven runner, and the duplicate legacy workflow have been removed. The project does not use Claude Code or Claude Agent SDK.\n\n### Metasploit discovery (implemented; read-only)\n\nInstall Metasploit Framework and make `msfconsole` available on `PATH`, then run:\n\n```bash\npython -m app.cli --action metasploit-search --cve CVE-2021-44228\npython -m app.cli --action metasploit-inspect --cve CVE-2021-44228 --module exploit/multi/http/log4shell_header_injection\n```\n\nThe search action returns candidate module paths. Inspection returns a typed `PoCCandidate` with module identity, parsed metadata, references, targets, options where the console output exposes them, and a SHA-256 digest of the raw metadata excerpt. The integration uses `msfconsole` with argument arrays and `shell=False`. It does not invoke `check`, `exploit`, payloads, or sessions. Metadata parsing is best-effort; the raw excerpt is retained so fields that cannot be parsed are not silently fabricated.
 
 ## Transitional target inputs
 
