@@ -22,7 +22,9 @@ class PoCCandidate(BaseModel):
 
     candidate_id: str = Field(min_length=1, max_length=256)
     source: Literal["metasploit", "github", "exploit_db", "upstream"]
+    # CVEs parsed from the module metadata itself; never copy the search query here.
     cve_ids: list[str] = Field(default_factory=list, max_length=50)
+    discovery_query_cve: str | None = Field(default=None, pattern=r"^CVE-[0-9]{4}-[0-9]{4,}$")
     module_type: Literal["exploit", "auxiliary"] | None = None
     module_path: str = Field(min_length=1, max_length=512)
     name: str | None = Field(default=None, max_length=500)
