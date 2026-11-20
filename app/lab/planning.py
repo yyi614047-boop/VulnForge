@@ -1,3 +1,5 @@
-"""Compatibility import; canonical planner agent lives in app.agents."""
-from app.agents.planner import Action, DeploymentPlan, Phase, Step, StructuredPlanner, lifecycle, validate_deployment_plan
-__all__ = ["Action", "DeploymentPlan", "Phase", "Step", "StructuredPlanner", "lifecycle", "validate_deployment_plan"]
+"""Compatibility exports for the canonical domain execution plan and planner."""
+from app.domain.plans import ExecutionAction as Action, ExecutionPhase as Phase, ExecutionPlan, ExecutionStep
+from app.agents.planner import StructuredPlanner, lifecycle, validate_execution_plan
+
+__all__ = ["Action", "ExecutionPlan", "ExecutionStep", "Phase", "StructuredPlanner", "lifecycle", "validate_execution_plan"]
