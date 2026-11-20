@@ -15,6 +15,10 @@ def test_canonical_architecture_packages_import_without_cycles():
 
 def test_legacy_card_import_is_confined_to_target_adapter():
     from app.lab.knowledge import Card as CompatibilityCard
+    from app.domain.reproduction import ReproductionSpec
     from app.targets.vulhub.legacy_cards import Card as LegacyCard
+    from app.targets.vulhub.catalog import TargetCatalog
 
-    assert CompatibilityCard is LegacyCard
+    assert CompatibilityCard is ReproductionSpec
+    assert LegacyCard is ReproductionSpec
+    assert TargetCatalog.__name__ == "TargetCatalog"

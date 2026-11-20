@@ -11,7 +11,8 @@ from pydantic import Field
 from app.runtime.context import agent_session, invoke_agent
 from app.agents.role_prompts import load_role_prompt
 from app.execution.artifacts import collect_assets, digest
-from app.targets.vulhub.legacy_cards import KnowledgeBase, StrictModel
+from app.domain.reproduction import StrictModel
+from app.targets.vulhub.catalog import TargetCatalog
 from app.environments.docker.manager import load_compose
 
 
@@ -38,7 +39,7 @@ class Researcher:
 
     @agent_session
     def research(self, identifier: str) -> dict:
-        kb = KnowledgeBase(self.knowledge)
+        kb = TargetCatalog(self.knowledge)
         card = kb.get(identifier)
         config_path = kb.environment(card)
         config = load_compose(config_path)

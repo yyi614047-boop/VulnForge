@@ -3,7 +3,7 @@ import time
 import urllib.error
 import urllib.request
 
-from app.targets.vulhub.legacy_cards import Probe
+from app.domain.reproduction import Probe
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

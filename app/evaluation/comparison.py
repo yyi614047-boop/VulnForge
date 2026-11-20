@@ -3,7 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from app.execution.artifacts import snapshot
-from app.targets.vulhub.legacy_cards import KnowledgeBase
+from app.targets.vulhub.catalog import TargetCatalog
 from app.workflows.reproduction.graph import Pipeline
 from app.execution.executor import atomic_json
 from app.tools.builtin.filesystem import file_hash, local_path
@@ -33,7 +33,7 @@ def compare_versions(knowledge, fixed_knowledge, identifier, fixed_identifier, w
     snapshot(Path(knowledge), original)
     snapshot(Path(fixed_knowledge), patched)
     knowledge, fixed_knowledge = original, patched
-    kb, fixed_kb = KnowledgeBase(knowledge), KnowledgeBase(fixed_knowledge)
+    kb, fixed_kb = TargetCatalog(knowledge), KnowledgeBase(fixed_knowledge)
     comparable((kb, kb.get(identifier)), (fixed_kb, fixed_kb.get(fixed_identifier)))
     report = {"status": "running", "arms": {}}
     atomic_json(report_path, report)

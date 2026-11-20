@@ -9,7 +9,8 @@ from pydantic import Field
 
 from app.runtime.context import agent_session, invoke_agent
 
-from app.targets.vulhub.legacy_cards import KnowledgeBase, StrictModel
+from app.domain.reproduction import StrictModel
+from app.targets.vulhub.catalog import TargetCatalog
 from app.workflows.reproduction.graph import Pipeline
 from app.execution.executor import atomic_json
 from app.environments.docker.manager import environment_assets, load_compose
@@ -54,7 +55,7 @@ class ScriptAuthoring:
         try:
             seed = root / "seed"
             snapshot(self.knowledge, seed)
-            kb = KnowledgeBase(seed)
+            kb = TargetCatalog(seed)
             card = kb.get(identifier)
             if not card.scripts:
                 raise ValueError("Script authoring requires declared script slots and independent assertions")

@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import yaml
 
-from app.targets.vulhub.legacy_cards import KnowledgeBase
+from app.targets.vulhub.catalog import TargetCatalog
 from app.environments.docker.manager import load_compose
 
 
@@ -29,7 +29,7 @@ def prepare_port(knowledge, workspace, identifier, *, chooser=choose_port):
     """为知识副本准备可用端口并记录端口选择结果。"""
     # Import lazily: authoring orchestrates Pipeline, which uses this preparation.
     from app.execution.artifacts import snapshot
-    kb = KnowledgeBase(knowledge)
+    kb = TargetCatalog(knowledge)
     card = kb.get(identifier)
     selected = chooser(card.port)
     if selected == card.port:

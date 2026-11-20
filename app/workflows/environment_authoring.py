@@ -10,7 +10,8 @@ from pydantic import Field
 from app.runtime.context import agent_session, invoke_agent
 
 from app.execution.artifacts import snapshot
-from app.targets.vulhub.legacy_cards import KnowledgeBase, StrictModel
+from app.domain.reproduction import StrictModel
+from app.targets.vulhub.catalog import TargetCatalog
 from app.execution.executor import atomic_json
 from app.environments.docker.manager import environment_assets, load_compose
 from app.tools.builtin.filesystem import WorkspaceFiles, WriteParams, file_hash, local_path
@@ -54,7 +55,7 @@ class EnvironmentAuthoring:
         try:
             seed = root / "seed"
             snapshot(self.knowledge, seed)
-            kb = KnowledgeBase(seed)
+            kb = TargetCatalog(seed)
             card = kb.get(identifier)
             env_path = local_path(seed, card.environment)
             if env_path.parent == seed or env_path.suffix not in {".yaml", ".yml", ".json"}:
