@@ -182,7 +182,7 @@ class Pipeline:
         if report_path.exists():
             raise FileExistsError("Report exists; choose a new report path")
         if self.auto_port:
-            from app.lab.ports import prepare_port
+            from app.environments.docker.network import prepare_port
             try:
                 self.knowledge, self.port_selection = prepare_port(self.knowledge, self.workspace, identifier)
                 self.researcher.knowledge = self.knowledge
