@@ -183,7 +183,7 @@ Until that decision is made, keep the verifier interface provider-neutral and do
 | `app/lab/comparison.py` | `evaluation/comparison.py` |
 | `app/tools/docker_engine.py` + `docker_lab.py` | `environments/docker/` (moved; old paths are compatibility imports) |
 | `app/tools/files.py` | `tools/builtin/filesystem.py` (moved; old path is compatibility import) |
-| `app/lab/knowledge.py` | isolated as `targets/vulhub/legacy_cards.py`; full removal awaits request/policy/plan/executor migration |
+| `app/lab/knowledge.py` | removed; reviewed YAML specs are loaded by `targets/vulhub/catalog.py` |
 
 ## 9. Removal and retention policy
 
@@ -219,8 +219,7 @@ No mass deletion or main-branch merge should happen before the relevant migratio
 
 ### Pending before calling the migration complete
 
-- Replace the remaining legacy `DeploymentPlan` planner/executor surface with `ExecutionPlan` as the single plan contract; the current adapter validates both but dispatch still consumes the legacy plan.
-- Replace the legacy YAML Card/KnowledgeBase dependency; remove `app/lab/knowledge.py` only after all call sites are migrated.
+- Replace the Planner's legacy `DeploymentPlan` output with direct `ExecutionPlan` generation; the executor now dispatches the domain plan, while the adapter and legacy schema remain only as a temporary planning compatibility layer.
 - Move workflow, agent, execution, tool, and Docker environment implementations into the target package layout without duplicate implementations.
 - Add container egress isolation so `network_scope` constrains Docker pull/build and container traffic, not only loopback HTTP probes.
 - Decide whether Metasploit is an optional check provider or corroborating verifier; do not make it mandatory before the safety contract is defined.
@@ -236,7 +235,7 @@ No mass deletion or main-branch merge should happen before the relevant migratio
 
 ### Still required
 
-- Complete the single-plan migration: the current Pipeline adapts the planner's legacy `DeploymentPlan` into `ExecutionPlan`, and the executor revalidates the adapter output before opening the lab, but dispatch still runs the legacy plan object.
+- Complete the single-plan migration: the Planner still emits legacy `DeploymentPlan`; the adapter validates and converts it to `ExecutionPlan`, which the executor now dispatches. The legacy plan is retained only for source/asset hash validation and compatibility during the transition.
 - Run a representative, explicitly reviewed local reproduction through Docker, including cleanup and independent verification; this repository currently contains no reviewed reproduction YAML fixture, so an end-to-end run cannot be honestly claimed.
 
 

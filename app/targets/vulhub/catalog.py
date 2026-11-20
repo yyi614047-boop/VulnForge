@@ -62,6 +62,8 @@ class TargetCatalog:
                     ports.append(int(entry["published"]))
             if ports:
                 published_ports[str(service)] = sorted(set(ports))
+        if card.service not in services or card.port not in published_ports.get(card.service, []):
+            raise ValueError("Reviewed reproduction service and port must be explicitly published on loopback")
 
         source_refs = []
         local_sources = {compose_path}
@@ -90,16 +92,16 @@ class TargetCatalog:
         entrypoints = sorted({script.source for script in [*spec.initialization, *spec.scripts]})
         assertions = []
         for probe in spec.verification_requests:
-            assertions.append(VerificationAssertion(assertion_id=f"{probe.id}-status", evidence_kind="http",
+            assertions.append(VerificationAssertion(assertion_id=f"{probe.id.lower()}-status", evidence_kind="http",
                 source=f"{probe.path}#status", operator="equals", expected_value=str(probe.expected_status)))
             if probe.body_contains:
-                assertions.append(VerificationAssertion(assertion_id=f"{probe.id}-body", evidence_kind="http",
+                assertions.append(VerificationAssertion(assertion_id=f"{probe.id.lower()}-body", evidence_kind="http",
                     source=f"{probe.path}#body", operator="contains", expected_value=probe.body_contains))
             if probe.log_contains:
-                assertions.append(VerificationAssertion(assertion_id=f"{probe.id}-log", evidence_kind="log",
+                assertions.append(VerificationAssertion(assertion_id=f"{probe.id.lower()}-log", evidence_kind="log",
                     source="compose_logs", operator="contains", expected_value=probe.log_contains))
         for rule in spec.file_evidence:
-            assertions.append(VerificationAssertion(assertion_id=rule.id, evidence_kind="file",
+            assertions.append(VerificationAssertion(assertion_id=rule.id.lower(), evidence_kind="file",
                 source=rule.path, operator="contains", expected_value=rule.contains))
         vulnerability = re.search(r"(?:CVE|CNVD)-\d{4}-\d+", spec.id, re.I)
 

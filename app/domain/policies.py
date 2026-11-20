@@ -41,6 +41,12 @@ class ExecutionPolicy(DomainModel):
         return self
 
     def authorize_target(self, target: TargetSpec, reproduction_spec: ReproductionSpec | None = None) -> None:
+        if self.network_scope != "loopback_only":
+            raise PermissionError("This runtime currently supports loopback_only network scope exclusively")
+        if "127.0.0.1" not in self.allowed_hosts:
+            raise PermissionError("Policy must explicitly allow the runtime loopback probe host")
+        if any(source.sha256 is None for source in target.sources):
+            raise PermissionError("Every target source must be content-hashed before policy approval")
         expected = self.approved_target_hashes.get(target.target_id)
         if expected is None or expected != target.fingerprint():
             raise PermissionError("Target is not approved or its content differs from the policy fingerprint")

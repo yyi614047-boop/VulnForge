@@ -13,7 +13,7 @@ from threading import Event
 from app.execution.probes import request, verify
 from app.domain.reproduction import ReproductionSpec as Card
 from app.targets.vulhub.catalog import TargetCatalog
-from app.agents.planner import DeploymentPlan, Step, validate_deployment_plan
+from app.agents.planner import DeploymentPlan, validate_deployment_plan
 from app.execution.artifacts import digest
 from app.environments.docker.manager import DockerLab, DockerLabParams, load_compose
 from app.tools.registry import ToolTimeoutError
@@ -22,7 +22,7 @@ from app.environments.docker.manager import environment_assets
 from app.execution.artifacts import collect_assets
 from app.execution.verifier import EvidenceVerifier
 from app.domain.results import Evidence
-from app.domain.plans import ExecutionPlan
+from app.domain.plans import ExecutionPlan, ExecutionStep
 from app.domain.policies import ExecutionPolicy
 from app.domain.targets import TargetSpec
 from app.domain.reproduction import ReproductionSpec
@@ -86,6 +86,8 @@ class StepExecutor:
         if domain_plan.model_dump(mode="json") != expected_domain_plan.model_dump(mode="json"):
             raise PermissionError("Execution plan changed after policy validation")
         domain_plan.validate_policy(execution_policy, target_spec, reproduction_spec)
+        for step in domain_plan.steps:
+            execution_policy.authorize_action(step.action, timeout_seconds=step.timeout_seconds, retries=step.retries)
         self.plan = validate_deployment_plan(plan, bundle, retries=retries, timeout=timeout, keep=keep)
         self.recovery_remaining = self.recovery_budget
         self.card, self.bundle = Card.model_validate(bundle["card"]), bundle
@@ -93,6 +95,14 @@ class StepExecutor:
         self.target_spec, self.reproduction_spec = target_spec, reproduction_spec
         # Detect source changes between research and execution, before side effects.
         current = self.kb.get(self.card.id)
+        current_target = self.kb.to_target_spec(current)
+        if current.fingerprint() != reproduction_spec.fingerprint():
+            raise PermissionError("Reproduction specification changed after policy validation")
+        if current_target.fingerprint() != target_spec.fingerprint():
+            raise PermissionError("Target sources or environment changed after policy validation")
+        domain_plan.validate_policy(execution_policy, current_target, current)
+        self.recovery_budget = min(self.recovery_budget, execution_policy.max_recovery_actions)
+        self.recovery_remaining = self.recovery_budget
         config = load_compose(self.kb.environment(current))
         if digest(current.model_dump_json()) != plan.card_hash or digest(json.dumps(config, sort_keys=True)) != plan.compose_hash:
             raise ValueError("Knowledge changed since planning; research and plan again")
@@ -134,7 +144,7 @@ class StepExecutor:
 
     def steps(self, phase):
         """筛选指定阶段下的全部计划步骤。"""
-        return [step for step in self.plan.steps if step.phase == phase]
+        return [step for step in self.domain_plan.steps if step.phase == phase]
 
     def execute_phase(self, phase):
         """按计划顺序执行某一个实验阶段中的步骤。"""
@@ -142,13 +152,14 @@ class StepExecutor:
             self.execute_step(step)
         return self.report
 
-    def execute_step(self, step: Step):
+    def execute_step(self, step: ExecutionStep):
         """持久化并执行单个步骤，同时处理依赖、重试和取消。"""
-        if step not in self.plan.steps:
+        if step not in self.domain_plan.steps:
             raise ValueError("Step is not in the validated plan")
-        if any(record["step_id"] == step.id for record in self.report["steps"]):
+        self.execution_policy.authorize_action(step.action, timeout_seconds=step.timeout_seconds, retries=step.retries)
+        if any(record["step_id"] == step.step_id for record in self.report["steps"]):
             raise ValueError("A completed or uncertain step cannot be replayed")
-        record = {"step_id": step.id, "action": step.action, "phase": step.phase,
+        record = {"step_id": step.step_id, "action": step.action, "phase": step.phase,
                   "status": "pending", "attempts": []}
         self.report["steps"].append(record)
         if step.action in {"verify_http", "read_file"} and (not self.started or self.report["status"] == "environment_error"):
@@ -167,7 +178,7 @@ class StepExecutor:
             self.report["status"] = "cancelled"
             self.save()
             return
-        total_attempts = step.max_retries + self.recovery_budget + 1
+        total_attempts = step.retries + self.recovery_budget + 1
         for number in range(total_attempts):
             attempt = {"number": number + 1, "started_at": datetime.now(timezone.utc).isoformat(), "status": "running"}
             record["attempts"].append(attempt)
@@ -181,9 +192,10 @@ class StepExecutor:
                 return
             except StepFailure as exc:
                 attempt.update(status="failed", error=str(exc), category=exc.category, evidence=exc.evidence)
-                planned_retry = exc.retryable and number < step.max_retries and not self.cancel.is_set()
+                policy_retryable = step.action in self.execution_policy.retryable_actions
+                planned_retry = exc.retryable and policy_retryable and number < step.retries and not self.cancel.is_set()
                 recovery_retry = False
-                if (not planned_retry and exc.retryable and self.recovery_controller is not None
+                if (not planned_retry and exc.retryable and policy_retryable and self.recovery_controller is not None
                         and self.recovery_remaining > 0 and not self.cancel.is_set()):
                     try:
                         decision = self.recovery_controller.decide(
@@ -194,21 +206,21 @@ class StepExecutor:
                         self.recovery_remaining -= 1
                         recovery_retry = decision.action == "retry"
                         self.report["events"].append({
-                            "step_id": step.id, "action": "recovery_decision",
+                            "step_id": step.step_id, "action": "recovery_decision",
                             "decision": decision.action, "reason": decision.reason,
                             "attempt": number + 1,
                         })
                     except Exception as decision_error:
                         self.recovery_remaining = max(0, self.recovery_remaining - 1)
                         self.report["events"].append({
-                            "step_id": step.id, "action": "recovery_error",
+                            "step_id": step.step_id, "action": "recovery_error",
                             "reason": str(decision_error), "fallback": "abort",
                         })
                 retry = planned_retry or recovery_retry
                 if retry:
                     delay = min(2 ** max(number, 0), 8)
                     self.report["events"].append({
-                        "step_id": step.id,
+                        "step_id": step.step_id,
                         "action": "planned_retry" if planned_retry else "agent_retry",
                         "reason": str(exc), "wait_seconds": delay,
                     })
@@ -239,7 +251,7 @@ class StepExecutor:
         """根据步骤动作分派到对应 Docker、HTTP、脚本或验证工具。"""
         if step.action == "version":
             import re
-            probe = next(p for p in self.card.version_probes if p.id == step.probe_id)
+            probe = next(p for p in self.card.version_probes if p.id == step.parameters.get("probe_id"))
             evidence = self.lab.probe_version(probe.service, probe.command, timeout=step.timeout_seconds)
             evidence["matched"] = (evidence.get("service") == probe.service and evidence.get("command") == probe.command
                 and evidence.get("exit_code") == 0 and not evidence.get("truncated")
@@ -266,7 +278,7 @@ class StepExecutor:
                 records.append(record.evidence)
             return {"artifacts": records}
         if step.action in {"initialize", "script"}:
-            script = next(p for p in [*self.card.initialization, *self.card.scripts] if p.id == step.probe_id)
+            script = next(p for p in [*self.card.initialization, *self.card.scripts] if p.id == step.parameters.get("probe_id"))
             artifact = self.artifacts[script.id]
             if file_hash(artifact) != self.bundle["assets"]["scripts"][script.source]:
                 raise StepFailure("Prepared script changed", "invalid_artifact")
@@ -278,7 +290,7 @@ class StepExecutor:
                 raise StepFailure("Script execution failed", "timeout" if evidence.get("timed_out") else "script_error", evidence=evidence)
             return evidence
         if step.action == "read_file":
-            rule = next(p for p in self.card.file_evidence if p.id == step.probe_id)
+            rule = next(p for p in self.card.file_evidence if p.id == step.parameters.get("probe_id"))
             evidence = self.lab.read_container_file(rule.service, rule.path, timeout=step.timeout_seconds)
             self.file_observations[rule.id] = evidence
             return evidence
@@ -321,7 +333,7 @@ class StepExecutor:
                 self.report["status"] = result["status"]
             return result
         if step.action in {"health", "http", "verify_http"}:
-            probe = self.card.health if step.action == "health" else next(p for p in [*self.card.reproduction, *self.card.verification_requests] if p.id == step.probe_id)
+            probe = self.card.health if step.action == "health" else next(p for p in [*self.card.reproduction, *self.card.verification_requests] if p.id == step.parameters.get("probe_id"))
             if self.probe_started_at is None:
                 self.probe_started_at = datetime.now(timezone.utc).isoformat()
             observation = self.requester(self.card.port, probe, timeout=step.timeout_seconds)
@@ -379,14 +391,14 @@ class StepExecutor:
                     self.report.update(cleanup="failed", cleanup_error=str(exc))
             # Cleanup is a finalizer: always runs, including interruption paths.
             for step in self.steps("cleanup"):
-                if not any(row["step_id"] == step.id for row in self.report["steps"]):
+                if not any(row["step_id"] == step.step_id for row in self.report["steps"]):
                     self.execute_step(step)
             if self.lab is not None and getattr(self.lab, "jobs", None):
                 self.report.update(cleanup="failed", cleanup_error="Script containers still require cleanup")
             known = {row["step_id"] for row in self.report["steps"]}
-            for step in self.plan.steps:
-                if step.id not in known:
-                    self.report["steps"].append({"step_id": step.id, "action": step.action, "phase": step.phase,
+            for step in self.domain_plan.steps:
+                if step.step_id not in known:
+                    self.report["steps"].append({"step_id": step.step_id, "action": step.action, "phase": step.phase,
                                                 "status": "skipped", "reason": "Execution interrupted", "attempts": []})
             self.report["finished_at"] = datetime.now(timezone.utc).isoformat()
             self.save()
