@@ -175,3 +175,50 @@ The exact URL path, TLS termination, and RPC listener configuration must match t
 ## 10. Related architecture
 
 This deployment proposal complements [Architecture v2](architecture-v2.md). The implementation should follow the existing principle: Agents propose; domain policy and deterministic Python code authorize and execute.
+
+
+## 11. Implementation philosophy: incremental MVP first
+
+**Working principle: implement a small, runnable slice first; improve hardening and completeness after the functionality works. Avoid designing the entire platform before the first end-to-end integration exists.**
+
+The Metasploit integration must be delivered in small, verifiable increments:
+
+1. Connect to a running local/private RPC endpoint and confirm authentication.
+2. Search modules by CVE and return a usable candidate list.
+3. Inspect one candidate and return its metadata and options.
+4. Add a basic compatibility assessment against a selected target.
+5. Add a real, controlled module check.
+6. Only then consider policy-gated exploit execution and session lifecycle.
+
+Each increment should have a runnable example and focused tests. Once that slice works, update the relevant Markdown documentation and push the code and documentation together. Do not block a working feature on unrelated production-hardening work.
+
+### What to keep simple in the first MVP
+
+- Use the existing Metasploit RPC authentication flow; implement only the token handling needed for the current client.
+- Use a straightforward Python HTTP + MessagePack client and a small number of typed methods.
+- Start with a local/private development endpoint. Add CA-bundle configuration and cross-host TLS deployment details when the deployment requires them.
+- Keep errors understandable and avoid leaking passwords or tokens, but defer elaborate secret-management and token-refresh infrastructure.
+- Return the fields needed by the next VulnForge stage; do not attempt to normalize every possible Metasploit module field.
+- Keep discovery read-only. Do not add generic arbitrary-RPC access to the Agent.
+
+### Minimum safety baseline (not a reason to over-engineer)
+
+- Do not commit RPC credentials.
+- Do not expose the RPC listener to the public Internet.
+- Do not give the Metasploit container the Docker socket.
+- Do not let CVE discovery automatically trigger a check or exploit.
+- Keep check/exploit as explicit later capabilities.
+
+These are baseline guardrails. Broader TLS deployment, network segmentation automation, Docker API proxy hardening, detailed audit schemas, and exhaustive security testing can be handled in later iterations when the corresponding capability is being implemented.
+
+### Delivery rule
+
+At the end of each meaningful implementation increment:
+
+- Run the focused unit tests and any relevant existing tests.
+- Record exactly what works, what was tested, and what remains incomplete.
+- Update this document (or the relevant implementation guide).
+- Commit and push the code and Markdown together.
+- Do not claim future phases are implemented.
+
+The goal is continuous working software, not a large design-only milestone.
