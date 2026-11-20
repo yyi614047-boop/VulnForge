@@ -9,7 +9,7 @@ def target(*, scripts=None, port=8080):
     return TargetSpec(
         target_id="demo:CVE-2024-12345", title="Demo vulnerable service", product="demo",
         vulnerability_id="CVE-2024-12345",
-        sources=[TargetSource(source_id="readme", path="demo/CVE-2024-12345/README.md")],
+        sources=[TargetSource(source_id="readme", path="demo/CVE-2024-12345/README.md", sha256="a" * 64)],
         environment=EnvironmentSpec(compose_file="demo/CVE-2024-12345/docker-compose.yml",
                                     services=["web"], published_ports={"web": [port]}),
         reproduction_entrypoints=scripts or [],

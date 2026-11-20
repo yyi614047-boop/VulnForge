@@ -62,7 +62,7 @@ class TargetCatalog:
                     ports.append(int(entry["published"]))
             if ports:
                 published_ports[str(service)] = sorted(set(ports))
-        if card.service not in services or card.port not in published_ports.get(card.service, []):
+        if spec.service not in services or spec.port not in published_ports.get(spec.service, []):
             raise ValueError("Reviewed reproduction service and port must be explicitly published on loopback")
 
         source_refs = []
