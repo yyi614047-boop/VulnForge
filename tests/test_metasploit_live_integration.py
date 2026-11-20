@@ -159,7 +159,7 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
             "-v", f"{module_root}:/root/.msf4/modules:ro",
             "--entrypoint", "ruby", msf_image, "msfrpcd",
             "-U", "vulnforge", "-P", password, "-a", "0.0.0.0",
-            "-p", "55553", "-S", "-f",
+            "-p", "55553", "-S", "-n", "-f",
             timeout=180,
         )
         assert started.returncode == 0, started.stderr
@@ -175,20 +175,26 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
 
         client = MetasploitRpcClient(
             MessagePackHttpTransport(
-                host="127.0.0.1", port=rpc_host_port, ssl_enabled=False, timeout=10,
+                host="127.0.0.1", port=rpc_host_port, ssl_enabled=False, timeout=3,
             ),
             username="vulnforge", password=password,
         )
         version = None
         last_error = None
-        for _ in range(90):
+        for _ in range(60):
             try:
                 version = client.call("core.version")
                 break
             except Exception as exc:
                 last_error = exc
-                time.sleep(2)
-        assert version and version.get("version"), f"Metasploit RPC did not become ready: {last_error}"
+                time.sleep(1)
+        if not version:
+            logs = docker("logs", msf_name, timeout=15)
+            state = docker("inspect", "-f", "{{.State.Status}}", msf_name, timeout=10)
+            raise AssertionError(
+                f"Metasploit RPC did not become ready: {last_error}; "
+                f"container_state={state.stdout.strip()}; logs={logs.stdout[-4000:]}{logs.stderr[-1000:]}"
+            )
 
         module_sha = hashlib.sha256(MODULE.encode()).hexdigest()
         target_id = "vulnforge-fixture:CVE-2099-0001"

@@ -135,7 +135,7 @@ export MSF_CONTAINER_NAME=vulnforge-msf
 docker run -d --name "$MSF_CONTAINER_NAME" \
   -p 127.0.0.1:55553:55553 \
   --entrypoint ruby metasploitframework/metasploit-framework:latest \
-  msfrpcd -U "$MSFRPC_USER" -P "$MSFRPC_PASS" -a 0.0.0.0 -p 55553 -S -f
+  msfrpcd -U "$MSFRPC_USER" -P "$MSFRPC_PASS" -a 0.0.0.0 -p 55553 -S -n -f
 
 python -m app.cli --action metasploit-rpc-version
 ```
