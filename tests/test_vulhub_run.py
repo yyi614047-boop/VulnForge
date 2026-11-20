@@ -47,7 +47,7 @@ def test_execute_plan_runs_markdown_operations_in_order_without_llm(tmp_path):
     report = {}
     result = workflow.execute_plan(bundle, report, tmp_path / "report.json")
     assert result == "completed"
-    assert report["execution_mode"] == "deterministic_documented_steps"
+    assert report["execution_mode"] == "langgraph_plan_act_observe"
     assert report["observations"][0]["source_quote"] == operation.quote
     assert report["observations"][0]["evidence"]["status"] == 200
 
