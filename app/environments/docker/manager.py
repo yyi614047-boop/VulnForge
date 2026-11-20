@@ -391,7 +391,7 @@ class DockerLab:
                     if binding.get("HostIp") == "127.0.0.1" and str(binding.get("HostPort")) == str(published_port):
                         matches.append(int(match.group(1)))
             if len(matches) != 1:
-                raise ValueError("Published target port does not resolve to exactly one TCP container port")
+                raise ValueError(f"Published target port {published_port} does not resolve to exactly one TCP container port; observed bindings={port_map!r}")
             compose_sha256 = __import__("hashlib").sha256(
                 json.dumps(config, sort_keys=True).encode("utf-8")
             ).hexdigest()
