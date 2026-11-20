@@ -316,7 +316,7 @@ class DockerLab:
         declared = config["services"][service].get("ports", [])
         if not any(
             isinstance(item, str)
-            and re.fullmatch(rf"127\.0\.0\.1:{published_port}:[0-9]+/tcp", item)
+            and re.fullmatch(rf"127\.0\.0\.1:{published_port}:[0-9]+(?:/tcp)?", item)
             for item in declared
         ):
             raise ValueError("Target port must be explicitly published on loopback as TCP")
