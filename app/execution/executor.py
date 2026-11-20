@@ -25,6 +25,8 @@ from app.domain.plans import ExecutionPlan, ExecutionStep
 from app.domain.policies import ExecutionPolicy
 from app.domain.targets import TargetSpec
 from app.domain.reproduction import ReproductionSpec
+from app.domain.poc import PoCCandidate
+from app.domain.poc_execution import build_poc_execution_spec
 from app.agents.planner import validate_execution_plan
 
 
@@ -52,7 +54,7 @@ class StepFailure(Exception):
 class StepExecutor:
     def __init__(self, knowledge: Path, workspace: Path, project: str, report_path: Path,
                  *, lab_factory=DockerLab.prepare, requester=request, sleeper=None, cancel=None,
-                 recovery_controller=None, recovery_budget=0):
+                 recovery_controller=None, recovery_budget=0, metasploit_adapter=None,\n                 metasploit_target_port=None, metasploit_options=None):
         """初始化组件及其运行所需的配置、依赖和状态。"""
         # Validate the project before using it in filesystem paths.
         DockerLab(workspace / project / "compose.json", project)
@@ -73,6 +75,9 @@ class StepExecutor:
         self.probe_started_at = None
         self.file_observations = {}
         self.artifacts = {}
+        self.metasploit_adapter = metasploit_adapter
+        self.metasploit_target_port = metasploit_target_port
+        self.metasploit_options = dict(metasploit_options or {})
 
     def open(self, plan: ExecutionPlan, bundle: dict, *, execution_policy: ExecutionPolicy | None = None,
              target_spec: TargetSpec | None = None, reproduction_spec: ReproductionSpec | None = None):
@@ -140,6 +145,96 @@ class StepExecutor:
         except BaseException:
             self.release()
             raise
+
+    def run_metasploit(self):
+        """Run the selected existing Metasploit PoC after the lab is deployed."""
+        record = {"status": "not_selected"}
+        selected_id = self.domain_plan.selected_poc_candidate_id
+        if not selected_id:
+            self.report["metasploit"] = record
+            self.save()
+            return record
+        if not self.started or self.report.get("status") == "environment_error":
+            record = {"status": "skipped", "reason": "Target lab is not running"}
+            self.report["metasploit"] = record
+            self.save()
+            return record
+        if self.cancel.is_set():
+            record = {"status": "skipped", "reason": "Run was cancelled"}
+            self.report["metasploit"] = record
+            self.save()
+            return record
+        if not self.execution_policy.allow_metasploit_check:
+            record = {"status": "policy_blocked", "reason": "Metasploit checks are disabled by policy"}
+            self.report["metasploit"] = record
+            self.save()
+            return record
+        if self.metasploit_adapter is None:
+            record = {"status": "adapter_unavailable", "reason": "Metasploit RPC adapter was not configured"}
+            self.report["metasploit"] = record
+            self.save()
+            return record
+
+        candidate_data = next(
+            (item for item in self.bundle.get("poc_candidates", [])
+             if item.get("candidate_id") == selected_id),
+            None,
+        )
+        if candidate_data is None:
+            raise PermissionError("Selected PoC candidate is missing from the research bundle")
+        candidate = PoCCandidate.model_validate(candidate_data)
+        published_ports = {
+            port for ports in self.target_spec.environment.published_ports.values() for port in ports
+        }
+        target_port = self.metasploit_target_port
+        if target_port is None:
+            if len(published_ports) != 1:
+                record = {
+                    "status": "configuration_required",
+                    "reason": "Specify --metasploit-target-port when the lab exposes zero or multiple ports",
+                    "available_ports": sorted(published_ports),
+                }
+                self.report["metasploit"] = record
+                self.save()
+                return record
+            target_port = next(iter(published_ports))
+
+        spec, assessment = build_poc_execution_spec(
+            candidate, self.target_spec, target_host="127.0.0.1",
+            target_port=target_port, supplied_options=self.metasploit_options,
+        )
+        record = {
+            "status": "checking",
+            "candidate_id": candidate.candidate_id,
+            "module_path": candidate.module_path,
+            "execution_spec": spec.model_dump(mode="json"),
+            "compatibility": assessment.model_dump(mode="json"),
+        }
+        self.report["metasploit"] = record
+        self.save()
+        try:
+            check = self.metasploit_adapter.check(
+                spec, candidate, self.target_spec, self.execution_policy,
+                timeout=min(60, self.execution_policy.max_timeout_seconds),
+            )
+            record["check"] = check.model_dump(mode="json")
+            if check.result_code != "vulnerable":
+                record["status"] = "check_" + check.result_code
+            elif not self.execution_policy.allow_metasploit_execute:
+                record["status"] = "check_vulnerable_execution_disabled"
+            else:
+                execution = self.metasploit_adapter.execute(
+                    spec, candidate, self.target_spec, self.execution_policy, check,
+                    timeout=min(120, self.execution_policy.max_timeout_seconds),
+                )
+                record["execution"] = execution.model_dump(mode="json")
+                record["status"] = "executed"
+        except Exception as exc:
+            record["status"] = "failed"
+            record["error"] = str(exc)
+        self.report["metasploit"] = record
+        self.save()
+        return record
 
     def save(self):
         """把当前执行报告原子写入磁盘。"""
