@@ -1,7 +1,7 @@
 # VulnForge Architecture v2
 
 > Product direction: **Agent-driven Vulnerability Reproduction Platform**.
-> Implementation status: the core LangGraph reproduction path and canonical execution-plan migration exist. A minimal read-only Metasploit RPC Discovery adapter (CVE search and module inspection), evidence-based Target Compatibility assessment, and explicit-target Option Preparation are implemented; automatic Docker target resolution, Check/Exploit execution, LangGraph integration, and container egress isolation remain planned.
+> Implementation status: the core LangGraph reproduction path and canonical execution-plan migration exist. A minimal Metasploit RPC Discovery adapter (CVE search and module inspection), evidence-based Target Compatibility assessment, Option Preparation, private Docker target resolution, and explicitly approved module.check execution are implemented; exploit execution, session management, LangGraph integration, and automated container network isolation remain planned.
 
 > PoC scope: discover, inspect, select, validate, execute, and verify **existing** PoCs and exploit modules. Autonomous PoC authoring is out of scope.
 
