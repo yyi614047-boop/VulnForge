@@ -229,3 +229,9 @@ The goal is continuous working software, not a large design-only milestone.
 The next incremental slice adds evidence-based compatibility assessment in `app/integrations/metasploit/compatibility.py` and the `metasploit-assess` CLI action. It inspects discovered candidates and compares explicit CVE references, product identity, affected-version evidence, and remote host/port option availability against a reviewed reproduction spec. Results are `compatible`, `partial`, `incompatible`, or `unknown`, with matched signals, unknowns, mismatches, and a suggested next step.
 
 This remains read-only. It does not call Metasploit Check or execute modules. The assessment deliberately avoids treating Metasploit rank or a CVE search hit as proof of target compatibility. See [Metasploit Discovery MVP](metasploit-discovery-mvp.md).
+
+
+
+## Current delivery: Option Preparation MVP
+
+A small option preparation helper is implemented in `app/integrations/metasploit/options.py`, with a `metasploit-prepare` CLI action. It inspects the first CVE search result by default, preserves module defaults, fills only declared target host/port options from an explicitly supplied reachable host and the reviewed reproduction port, and reports any remaining required options. It does not guess container IP addresses or execute modules. See [Metasploit Discovery MVP](metasploit-discovery-mvp.md) for the command and Python API.
