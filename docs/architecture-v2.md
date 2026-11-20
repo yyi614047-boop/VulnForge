@@ -277,4 +277,4 @@ The planned Metasploit integration does not require Docker-in-Docker (DinD). Run
 
 Detailed deployment topology, RPC security, network planes, rollout phases, and acceptance checklist: [Metasploit and Docker Deployment Architecture](metasploit-docker-deployment.md).
 
-This is a design proposal, not an implementation claim. Metasploit RPC integration and container egress isolation remain pending.
+This deployment topology remains a design proposal. The first read-only Metasploit RPC Discovery slice is implemented; Check/Exploit integration and container egress isolation remain pending.
