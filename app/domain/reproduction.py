@@ -11,7 +11,7 @@ class StrictModel(BaseModel):
 
 
 class Probe(StrictModel):
-    id: str = Field(pattern=r"^[a-zA-Z0-9_-]+$")
+    id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,199}$")
     path: str = Field(pattern=r"^/[^\r\n]*$")
     method: Literal["GET", "POST"] = "GET"
     body: str | None = None

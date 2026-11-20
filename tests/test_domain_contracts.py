@@ -20,7 +20,7 @@ def policy(approved_target=None, **overrides):
     selected = approved_target or target()
     values = dict(
         policy_id="local-reviewed-lab", approved_target_hashes={selected.target_id: selected.fingerprint()},
-        allowed_actions={"up", "http", "verify_http", "down"}, allowed_services={"web"},
+        allowed_actions={"up", "http", "verify_http", "down"}, retryable_actions={"up"}, allowed_services={"web"},
         allowed_ports={8080}, max_timeout_seconds=60, max_retries_per_step=1,
     )
     values.update(overrides)
