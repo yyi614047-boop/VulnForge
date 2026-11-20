@@ -1,7 +1,7 @@
 # VulnForge Architecture v2
 
 > Product direction: **Agent-driven Vulnerability Reproduction Platform**.
-> Implementation status: the core LangGraph reproduction path and canonical execution-plan migration exist; Metasploit-first discovery/execution and container egress isolation are planned integrations, not completed capabilities.
+> Implementation status: the core LangGraph reproduction path and canonical execution-plan migration exist; Read-only Metasploit CVE discovery and module inspection are implemented on this branch; Planner integration, RPC execution, and container egress isolation remain pending.
 
 > PoC scope: discover, inspect, select, validate, execute, and verify **existing** PoCs and exploit modules. Autonomous PoC authoring is out of scope.
 
@@ -125,7 +125,7 @@ Initial shared contracts:
 - `ReproductionRequest`: user intent, CVE/repository/description, optional supplied target specification.
 - `TargetSpec`: target identity, source references, version, environment inputs, and reproduction entry points. It is a target description, not a permission grant.
 - `ExecutionPolicy`: trusted allowlist of targets, tools/actions, network scope, resource limits, timeouts, and retry budget.
-- `PoCCandidate` (planned): source, candidate/module/script identity, CVE references, type, version constraints, required options, capabilities, and provenance.
+- `PoCCandidate`: typed discovered candidate with source/module identity, CVE references, type, parsed metadata/options, and raw-metadata fingerprint. Candidate-to-plan selection remains pending.
 - `PoCExecutionSpec` (planned): selected candidate, backend, approved parameters, execution mode, and expected outputs.
 - `ExecutionPlan`: ordered steps, dependencies, selected candidate/backend, target binding, expected observations, and verification intent.
 - `ExecutionStep`: typed action and validated parameters.
@@ -150,7 +150,7 @@ Models should be introduced only when a real cross-module contract needs them. D
 
 ## 7. PoC discovery and backend integration
 
-Metasploit is the **primary PoC source and planned execution backend**. It is not a separate Agent and it is not the whole application. Search results are candidates, not proof of compatibility or authorization.
+Metasploit is the **primary PoC source**; read-only CVE discovery and module inspection are implemented, while execution backend integration remains planned. It is not a separate Agent and it is not the whole application. Search results are candidates, not proof of compatibility or authorization.
 
 Discovery priority:
 1. Metasploit Framework: search CVE references; inspect module identity, type, description, supported targets, product/version constraints, options, check support, payload/session requirements, side effects, and provenance.
@@ -161,7 +161,7 @@ A Metasploit module mentioning a CVE does not prove that it affects the selected
 
 Keep verification provider-neutral. A module's own success message or session creation is not, by itself, sufficient proof; the Verifier must independently assess target-specific HTTP, file, log, or other evidence.
 
-The planned Metasploit integration should use a controlled API such as msfrpcd/RPC. Start with read-only search and module inspection, then add policy-gated `check` and explicitly approved exploit execution. Do not expose unrestricted msfconsole commands to the Agent. Payloads, sessions, credentials, timeouts, side effects, and cleanup require explicit controls.
+The current discovery service invokes only `msfconsole search` and `info` with validated inputs and `shell=False`. It does not run `check` or `exploit`. The next execution integration should use a controlled API such as msfrpcd/RPC, then add policy-gated `check` and explicitly approved exploit execution. Do not expose unrestricted msfconsole commands to the Agent. Payloads, sessions, credentials, timeouts, side effects, and cleanup require explicit controls.
 
 ## 8. Legacy migration map
 
@@ -261,4 +261,4 @@ Do not make Metasploit a mandatory runtime dependency until its adapter and secu
 - Primary vulnerable-environment source: Vulhub; native Vulhub PoCs are optional rather than assumed.
 - PoC authoring/generation: explicitly out of scope.
 - Separation of concerns: Researcher discovers and inspects; Planner selects and plans; deterministic policy authorizes; Executor invokes adapters; Verifier independently evaluates evidence; Recovery coordinates bounded retry/replan/backend-switch/abort.
-- Metasploit-first discovery and RPC execution are target capabilities, not yet implemented on this branch.
+- Read-only Metasploit CVE discovery and module metadata inspection are implemented on the feature branch through `app/discovery/metasploit.py` and the `metasploit-search` / `metasploit-inspect` CLI actions. They are not yet part of the LangGraph Planner/Executor path.\n- Metasploit RPC execution, policy-bound checks, candidate selection in Planner, and standalone PoC adapters remain unimplemented.
