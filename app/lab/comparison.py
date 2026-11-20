@@ -44,7 +44,7 @@ def compare_versions(knowledge, fixed_knowledge, identifier, fixed_identifier, w
             atomic_json(report_path, report)
             execution = pipeline_factory(Path(source), root / "labs", f"{run_id}-{label}",
                 timeout=timeout, docker_engine=docker_engine, auto_port=True,
-                index_path=root / f"{label}-rag.sqlite").run(card_id, path)
+                ).run(card_id, path)
             report["arms"][label].update(status=execution["status"], cleanup=execution.get("cleanup"),
                 verification=execution.get("verification"),
                 failed_steps=[s["action"] for s in execution.get("steps", []) if s["status"] == "failed"])
