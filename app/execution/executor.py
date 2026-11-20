@@ -13,7 +13,6 @@ from threading import Event
 from app.execution.probes import request, verify
 from app.domain.reproduction import ReproductionSpec as Card
 from app.targets.vulhub.catalog import TargetCatalog
-from app.agents.planner import DeploymentPlan, validate_deployment_plan
 from app.execution.artifacts import digest
 from app.environments.docker.manager import DockerLab, DockerLabParams, load_compose
 from app.tools.registry import ToolTimeoutError
@@ -26,7 +25,6 @@ from app.domain.plans import ExecutionPlan, ExecutionStep
 from app.domain.policies import ExecutionPolicy
 from app.domain.targets import TargetSpec
 from app.domain.reproduction import ReproductionSpec
-from app.execution.plan_adapter import to_execution_plan
 
 
 def atomic_json(path: Path, payload):
@@ -75,38 +73,41 @@ class StepExecutor:
         self.file_observations = {}
         self.artifacts = {}
 
-    def open(self, plan: DeploymentPlan, bundle: dict, *, retries=1, timeout=60, keep=False, domain_plan: dict | ExecutionPlan | None = None, execution_policy: ExecutionPolicy | None = None, target_spec: TargetSpec | None = None, reproduction_spec: ReproductionSpec | None = None):
-        """校验计划、知识卡和资产，并初始化持久化执行报告。"""
+    def open(self, plan: ExecutionPlan, bundle: dict, *, execution_policy: ExecutionPolicy | None = None,
+             target_spec: TargetSpec | None = None, reproduction_spec: ReproductionSpec | None = None):
+        """Revalidate the canonical plan and its source fingerprints before side effects."""
         if self.report is not None:
             raise ValueError("Executor instances are single-run")
-        if execution_policy is None or target_spec is None or reproduction_spec is None or domain_plan is None:
-            raise PermissionError("ExecutionPolicy, approved TargetSpec, ReproductionSpec, and validated ExecutionPlan are required")
-        domain_plan = ExecutionPlan.model_validate(domain_plan)
-        expected_domain_plan = to_execution_plan(plan, target_spec, reproduction_spec, execution_policy)
-        if domain_plan.model_dump(mode="json") != expected_domain_plan.model_dump(mode="json"):
-            raise PermissionError("Execution plan changed after policy validation")
-        domain_plan.validate_policy(execution_policy, target_spec, reproduction_spec)
-        for step in domain_plan.steps:
-            execution_policy.authorize_action(step.action, timeout_seconds=step.timeout_seconds, retries=step.retries)
-        self.plan = validate_deployment_plan(plan, bundle, retries=retries, timeout=timeout, keep=keep)
-        self.recovery_remaining = self.recovery_budget
-        self.card, self.bundle = Card.model_validate(bundle["card"]), bundle
-        self.domain_plan, self.execution_policy = domain_plan, execution_policy
-        self.target_spec, self.reproduction_spec = target_spec, reproduction_spec
-        # Detect source changes between research and execution, before side effects.
-        current = self.kb.get(self.card.id)
+        if execution_policy is None or target_spec is None or reproduction_spec is None:
+            raise PermissionError("ExecutionPolicy, approved TargetSpec and ReproductionSpec are required")
+        plan = ExecutionPlan.model_validate(plan.model_dump(mode="json") if hasattr(plan, "model_dump") else plan)
+        if bundle["card_hash"] != reproduction_spec.fingerprint():
+            raise PermissionError("Research bundle is not bound to the reviewed reproduction specification")
+        expected = {
+            "reproduction": bundle["card_hash"],
+            "compose": bundle["compose_hash"],
+            "assets": bundle["assets_hash"],
+        }
+        if plan.input_fingerprints != expected:
+            raise PermissionError("Execution plan provenance differs from the research bundle")
+        current = self.kb.get(reproduction_spec.id)
         current_target = self.kb.to_target_spec(current)
         if current.fingerprint() != reproduction_spec.fingerprint():
             raise PermissionError("Reproduction specification changed after policy validation")
         if current_target.fingerprint() != target_spec.fingerprint():
             raise PermissionError("Target sources or environment changed after policy validation")
-        domain_plan.validate_policy(execution_policy, current_target, current)
+        plan.validate_policy(execution_policy, current_target, current)
+        for step in plan.steps:
+            execution_policy.authorize_action(step.action, timeout_seconds=step.timeout_seconds, retries=step.retries)
         self.recovery_budget = min(self.recovery_budget, execution_policy.max_recovery_actions)
         self.recovery_remaining = self.recovery_budget
+        self.plan = self.domain_plan = plan
+        self.execution_policy, self.target_spec, self.reproduction_spec = execution_policy, current_target, current
+        self.card, self.bundle = Card.model_validate(bundle["card"]), bundle
         config = load_compose(self.kb.environment(current))
-        if digest(current.model_dump_json()) != plan.card_hash or digest(json.dumps(config, sort_keys=True)) != plan.compose_hash:
-            raise ValueError("Knowledge changed since planning; research and plan again")
-        if digest(json.dumps(collect_assets(self.kb, current, config), sort_keys=True)) != plan.assets_hash:
+        if digest(current.model_dump_json()) != expected["reproduction"] or digest(json.dumps(config, sort_keys=True)) != expected["compose"]:
+            raise ValueError("Research inputs changed since planning; research and plan again")
+        if digest(json.dumps(collect_assets(self.kb, current, config), sort_keys=True)) != expected["assets"]:
             raise ValueError("Build, mount or script inputs changed since planning")
         lock_dir = self.workspace / ".locks"
         lock_dir.mkdir(parents=True, exist_ok=True)
@@ -118,15 +119,14 @@ class StepExecutor:
                 self.locks.append(path)
             if self.report_path.exists():
                 raise FileExistsError("Report already exists; choose a new report path to preserve prior evidence")
-            self.report = {"id": self.card.id, "project": self.project, "status": "pending", "cleanup": "not_needed",
-                           "research": bundle, "plan": plan.model_dump(), "domain_plan": domain_plan.model_dump(mode="json"),
-                           "authorization": {
-                               "policy_id": execution_policy.policy_id,
-                               "target_fingerprint": target_spec.fingerprint(),
-                               "reproduction_fingerprint": reproduction_spec.fingerprint(),
-                           },
-                           "steps": [], "events": [],
-                           "started_at": datetime.now(timezone.utc).isoformat()}
+            self.report = {
+                "id": self.card.id, "project": self.project, "status": "pending", "cleanup": "not_needed",
+                "research": bundle, "plan": plan.model_dump(mode="json"),
+                "authorization": {"policy_id": execution_policy.policy_id,
+                    "target_fingerprint": current_target.fingerprint(),
+                    "reproduction_fingerprint": current.fingerprint()},
+                "steps": [], "events": [], "started_at": datetime.now(timezone.utc).isoformat(),
+            }
             self.save()
         except BaseException:
             self.release()
@@ -354,7 +354,7 @@ class StepExecutor:
                 # Verify the prepared snapshot as well as the source.
                 if hasattr(self.lab, "compose"):
                     prepared = self.lab.configuration()
-                    if digest(json.dumps(prepared, sort_keys=True)) != self.plan.compose_hash:
+                    if digest(json.dumps(prepared, sort_keys=True)) != self.plan.input_fingerprints["compose"]:
                         raise StepFailure("Prepared environment changed", "invalid_environment")
                     if environment_assets(self.lab.compose, prepared, base=self.lab.input_root) != self.bundle["assets"]["environment"]:
                         raise StepFailure("Prepared build or mount inputs changed", "invalid_environment")
