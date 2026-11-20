@@ -86,3 +86,21 @@ The Planner receives compact candidate metadata and may propose one candidate fo
 The selected candidate ID and rationale are recorded in the canonical `ExecutionPlan`. The candidate list's SHA-256 fingerprint is also included in `input_fingerprints`, and is revalidated before deployment. Raw module excerpts are excluded from the Planner prompt to keep the context bounded, but remain in the Researcher report for audit.
 
 This selection is **not** a compatibility determination or execution authorization. Product/version compatibility remains unverified unless separately grounded. The selected candidate is not executed; the existing fixed reproduction lifecycle is unchanged. If no LLM is configured, candidates are surfaced for manual review and no automatic selection is made.
+
+
+## Execution proposal and compatibility gate (third milestone)
+
+The domain now defines `PoCExecutionSpec` and `CompatibilityAssessment` in `app/domain/poc_execution.py`.
+
+A proposal binds one inspected Metasploit exploit to:
+- the exact target ID and target fingerprint;
+- the CVE independently present in module metadata;
+- a loopback target host and a port declared by the selected lab environment;
+- known module options, with `RHOSTS` and `RPORT` derived from the bound target;
+- the inspected module metadata SHA-256.
+
+The compatibility gate rejects non-Metasploit/non-exploit candidates, uninspected modules, missing or mismatched module CVE references, non-loopback destinations, undeclared ports, unknown option names, caller overrides of `RHOSTS`/`RPORT`, and missing required options.
+
+**Compatibility remains `unknown` unless independent product/version evidence exists.** Metasploit's target labels and rank are retained as metadata, but are not treated as proof that the module supports the lab's product/version.
+
+The spec always carries `approval_required=true`. This milestone only constructs and validates a review proposal; it does not invoke `check`, `exploit`, RPC, payloads, or sessions. Execution remains blocked until a separately authorized RPC adapter and explicit policy gate are implemented.
