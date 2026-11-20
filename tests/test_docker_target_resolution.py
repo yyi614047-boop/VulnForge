@@ -156,7 +156,7 @@ class NetworkSetupRunner:
         if argv[:4] in (
             ["docker", "network", "disconnect", "bridge"],
             ["docker", "network", "connect", "lab-shared"],
-        ):
+        ) or argv[:3] == ["docker", "restart", "msf"]:
             return Result()
         raise AssertionError(f"Unexpected command: {argv}")
 
