@@ -157,7 +157,7 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
             "run", "-d", "--name", msf_name,
             "-p", f"127.0.0.1:{rpc_host_port}:55553/tcp",
             "-v", f"{module_root}:/root/.msf4/modules:ro",
-            "--entrypoint", "msfrpcd", msf_image,
+            "--entrypoint", "ruby", msf_image, "msfrpcd",
             "-U", "vulnforge", "-P", password, "-a", "0.0.0.0",
             "-p", "55553", "-S", "-f",
             timeout=180,
