@@ -29,6 +29,9 @@ def _parser():
     parser.add_argument("--msfconsole", default="msfconsole", help="Path to the msfconsole executable")
     parser.add_argument("--msf-timeout", type=int, default=180, choices=range(1, 901), metavar="SECONDS")
     parser.add_argument("--discover-metasploit", action="store_true", help="Include read-only Metasploit candidates during research/planning")
+    parser.add_argument("--execute-metasploit", action="store_true", help="Run the selected existing Metasploit module through the policy-gated RPC adapter")
+    parser.add_argument("--metasploit-target-port", type=int, help="Explicit published lab port for the Metasploit target")
+    parser.add_argument("--metasploit-option", action="append", default=[], metavar="KEY=VALUE", help="Explicit additional module option; may be repeated")
     parser.add_argument("--environment", help="Relative target directory for target-inspect")
     parser.add_argument("--request-file", type=Path, help="JSON ReproductionRequest for request-validate")
     parser.add_argument("--policy-file", type=Path, help="Reviewed JSON ExecutionPolicy required for run")
@@ -67,6 +70,8 @@ def main():
         target = VulhubTargetLoader(args.targets).load(args.environment)
         print(json.dumps(target.model_dump(mode="json"), ensure_ascii=False, indent=2))
         return
+    if args.execute_metasploit and (not args.discover_metasploit or args.action != "run"):
+        parser.error("--execute-metasploit requires --discover-metasploit and --action run")
     if args.action in {"metasploit-search", "metasploit-inspect"}:
         if not args.cve:
             parser.error(f"--action {args.action} requires --cve")
@@ -170,6 +175,22 @@ def main():
                 retries=args.retries, timeout=args.timeout, keep=args.keep)
             print(json.dumps(plan.model_dump(mode="json"), ensure_ascii=False, indent=2))
             return
+        executor_options = {}
+        if args.execute_metasploit:
+            from app.execution.metasploit_rpc import MetasploitRpcAdapter, MetasploitRpcClient
+            module_options = {}
+            for raw_option in args.metasploit_option:
+                if "=" not in raw_option:
+                    parser.error("--metasploit-option must use KEY=VALUE")
+                key, value = raw_option.split("=", 1)
+                if not key or key in module_options:
+                    parser.error("Metasploit option names must be non-empty and unique")
+                module_options[key] = value
+            executor_options = {
+                "metasploit_adapter": MetasploitRpcAdapter(MetasploitRpcClient.from_env()),
+                "metasploit_target_port": args.metasploit_target_port,
+                "metasploit_options": module_options,
+            }
         project = args.project or f"lab-{uuid4().hex[:12]}"
         report_path = args.report or Path("reports") / f"{project}.json"
         pipeline = Pipeline(
@@ -177,6 +198,7 @@ def main():
             retries=args.retries, timeout=args.timeout, keep=args.keep,
             docker_engine=DockerEngine(), engine_timeout=args.engine_timeout,
             execution_policy=policy,
+            executor_options=executor_options,
             poc_discovery=MetasploitDiscovery(executable=args.msfconsole, timeout=args.msf_timeout) if args.discover_metasploit else None,
         )
         report = pipeline.run(args.identifier, report_path)
