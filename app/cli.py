@@ -212,6 +212,7 @@ def main():
         from app.integrations.metasploit import (
             MetasploitRPCClient, MetasploitDiscovery, prepare_module_options,
         )
+        from app.integrations.metasploit.execution import options_fingerprint
         url = os.environ.get("METASPLOIT_RPC_URL", "http://127.0.0.1:55553/api/")
         username = os.environ.get("METASPLOIT_RPC_USERNAME")
         password = os.environ.get("METASPLOIT_RPC_PASSWORD")
@@ -224,13 +225,24 @@ def main():
             prepared = []
             for candidate in candidates:
                 metadata = discovery.inspect(candidate)
+                option_result = prepare_module_options(
+                    candidate, metadata,
+                    target_host=args.target_host,
+                    target_port=args.target_port if args.target_port is not None else spec.port,
+                )
                 prepared.append({
                     "candidate": candidate.model_dump(mode="json"),
-                    "prepared_options": prepare_module_options(
-                        candidate, metadata,
-                        target_host=args.target_host,
-                        target_port=args.target_port if args.target_port is not None else spec.port,
-                    ).model_dump(mode="json"),
+                    "prepared_options": option_result.model_dump(mode="json"),
+                    "options_sha256": options_fingerprint(option_result.options),
+                    "approval_template": {
+                        "policy_id": "REVIEW_REQUIRED",
+                        "candidate_id": candidate.candidate_id,
+                        "target_id": target.target_id,
+                        "target_host": option_result.target_host,
+                        "target_port": option_result.target_port,
+                        "options_sha256": options_fingerprint(option_result.options),
+                        "max_wait_seconds": 60,
+                    } if option_result.ready else None,
                 })
             print(json.dumps({
                 "cve": cve,
