@@ -222,3 +222,10 @@ At the end of each meaningful implementation increment:
 - Do not claim future phases are implemented.
 
 The goal is continuous working software, not a large design-only milestone.
+
+
+## Current delivery: Target Compatibility MVP
+
+The next incremental slice adds evidence-based compatibility assessment in `app/integrations/metasploit/compatibility.py` and the `metasploit-assess` CLI action. It inspects discovered candidates and compares explicit CVE references, product identity, affected-version evidence, and remote host/port option availability against a reviewed reproduction spec. Results are `compatible`, `partial`, `incompatible`, or `unknown`, with matched signals, unknowns, mismatches, and a suggested next step.
+
+This remains read-only. It does not call Metasploit Check or execute modules. The assessment deliberately avoids treating Metasploit rank or a CVE search hit as proof of target compatibility. See [Metasploit Discovery MVP](metasploit-discovery-mvp.md).
