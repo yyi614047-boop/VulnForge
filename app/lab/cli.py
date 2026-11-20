@@ -24,8 +24,6 @@ def main():
     parser.add_argument("--workspace", type=Path, default=Path(".labs"))
     parser.add_argument("--project")
     parser.add_argument("--report", type=Path)
-    parser.add_argument("--engine", choices=["langgraph", "sequential"], default="langgraph")
-    parser.add_argument("--max-steps", type=int, default=30, help="Maximum agent decision rounds")
     parser.add_argument("--retries", type=int, default=1)
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--keep", action="store_true")
@@ -85,7 +83,7 @@ def main():
         workflow = VulhubRun(args.knowledge, args.workspace, project, source_model(), retries=args.retries,
                              timeout=args.timeout, keep=args.keep, docker_engine=DockerEngine(),
                              engine_timeout=args.engine_timeout, auto_port=not args.fixed_port,
-                             max_steps=args.max_steps)
+                             )
         if args.action == "plan":
             result = workflow.plan(args.query)
             print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -94,7 +92,7 @@ def main():
             return
 
         path = args.report or Path("reports") / f"{project}.json"
-        report = workflow.run(args.query, path, engine=args.engine)
+        report = workflow.run(args.query, path)
         print(json.dumps({"status": report["status"], "cleanup": report.get("cleanup"),
                           "report": str(path.resolve()), "trace": report.get("trace")}, ensure_ascii=False, indent=2))
         if report["status"] != "success" or report.get("cleanup") == "failed":
