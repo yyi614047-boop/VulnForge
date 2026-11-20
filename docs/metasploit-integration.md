@@ -129,8 +129,8 @@ Configure credentials through environment variables (never commit them):
 - `MSFRPC_USER`
 - `MSFRPC_PASS`
 
-The adapter exposes no arbitrary console/RPC passthrough. It only supports the named flow:
-1. `module.check` on an inspected exploit with Check support;
+The adapter exposes no arbitrary console/RPC passthrough and the RPC client has an explicit method allowlist. It only supports the named flow:
+1. `module.check` on an inspected exploit; modules without a Check method are returned as `unsupported` rather than treated as exploitable;
 2. wait for the module result and require the exact `vulnerable` result code;
 3. `module.execute` only when the same adapter instance has recorded that successful check;
 4. inspect newly created sessions and stop only sessions matching the exact target host and exploit module.
