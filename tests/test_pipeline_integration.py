@@ -118,6 +118,6 @@ def test_pipeline_fails_closed_without_policy_before_environment_side_effects(tm
     )
     report = pipeline.run(spec.id, tmp_path / "denied.json")
 
-    assert report["status"] == "invalid_plan"
+    assert report["status"] == "policy_denied"
     assert "ExecutionPolicy" in report["error"]
     assert lab_calls == []
