@@ -173,3 +173,23 @@ def build_poc_execution_spec(
         compatibility_status=assessment.status,
     )
     return spec, assessment
+
+
+class MetasploitCheckOutcome(DomainModel):
+    candidate_id: str
+    module_metadata_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    target_id: str
+    target_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    job_uuid: str = Field(min_length=1, max_length=128)
+    status: Literal["completed", "failed"]
+    result_code: Literal["vulnerable", "safe", "detected", "appears", "unknown", "not_vulnerable", "unsupported"] = "unknown"
+    result: dict = Field(default_factory=dict, max_length=100)
+
+
+class MetasploitExecutionOutcome(DomainModel):
+    candidate_id: str
+    target_id: str
+    job_uuid: str = Field(min_length=1, max_length=128)
+    status: Literal["completed", "failed"]
+    result: dict = Field(default_factory=dict, max_length=100)
+    cleaned_session_ids: list[int] = Field(default_factory=list, max_length=100)
