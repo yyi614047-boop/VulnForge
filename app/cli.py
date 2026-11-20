@@ -5,6 +5,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from app.domain.requests import ReproductionRequest
+from app.domain.policies import ExecutionPolicy
+from app.targets.vulhub.catalog import TargetCatalog
 from app.targets.vulhub import VulhubTargetLoader
 from app.runtime.models import configured_model
 from app.workflows.reproduction.graph import Pipeline
@@ -16,12 +18,13 @@ from app.environments.docker.engine import DockerEngine
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("identifier", nargs="?", help="Reviewed reproduction specification identifier")
-    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate"], default="run")
+    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate", "policy-preview"], default="run")
     parser.add_argument("--targets", type=Path, default=Path("targets/vulhub"),
                         help="Root of the retained Vulhub target corpus")
     parser.add_argument("--query", help="Search query for target-search")
     parser.add_argument("--environment", help="Relative target directory for target-inspect")
     parser.add_argument("--request-file", type=Path, help="JSON ReproductionRequest for request-validate")
+    parser.add_argument("--policy-file", type=Path, help="Reviewed JSON ExecutionPolicy required for run")
     parser.add_argument("--specs", type=Path, default=Path("reproductions"),
                         help="Directory containing reviewed YAML reproduction specifications")
     parser.add_argument("--workspace", type=Path, default=Path(".labs"))
@@ -64,6 +67,51 @@ def main():
         request = ReproductionRequest.model_validate(json.loads(args.request_file.read_text(encoding="utf-8")))
         print(json.dumps(request.model_dump(mode="json"), ensure_ascii=False, indent=2))
         return
+    if args.action == "policy-preview":
+        if not args.identifier:
+            parser.error("--action policy-preview requires a reproduction-spec identifier")
+        catalog = TargetCatalog(args.specs)
+        spec = catalog.get(args.identifier)
+        target = catalog.to_target_spec(spec)
+        actions = {"pull", "up", "status", "health", "logs", "verify", "down"}
+        if spec.reproduction:
+            actions.add("http")
+        if spec.verification_requests:
+            actions.add("verify_http")
+        if spec.file_evidence:
+            actions.add("read_file")
+        if spec.version_probes:
+            actions.add("version")
+        if spec.initialization:
+            actions.update({"stage_artifacts", "initialize"})
+        if spec.scripts:
+            actions.update({"stage_artifacts", "script"})
+        if target.environment.build_required:
+            actions.add("build")
+        template = {
+            "policy_id": f"reviewed-{spec.id}",
+            "approved_target_hashes": {target.target_id: target.fingerprint()},
+            "approved_reproduction_hashes": {spec.id: spec.fingerprint()},
+            "allowed_actions": sorted(actions),
+            "retryable_actions": ["pull"],
+            "allowed_services": target.environment.services,
+            "allowed_ports": sorted({p for ports in target.environment.published_ports.values() for p in ports}),
+            "network_scope": "loopback_only",
+            "allowed_hosts": ["127.0.0.1", "localhost"],
+            "max_timeout_seconds": 60,
+            "max_retries_per_step": 1,
+            "max_recovery_actions": 1,
+            "allow_image_build": False,
+            "allow_target_scripts": False,
+            "allow_keep_environment": False,
+        }
+        print(json.dumps({
+            "target_spec": target.model_dump(mode="json"),
+            "target_fingerprint": target.fingerprint(),
+            "reproduction_fingerprint": spec.fingerprint(),
+            "policy_template": template,
+        }, ensure_ascii=False, indent=2))
+        return
     if args.action == "engine":
         result = DockerEngine().registry().call("ensure_docker_engine", {
             "start": not args.check_only, "timeout": args.engine_timeout})
@@ -72,7 +120,9 @@ def main():
             raise SystemExit(1)
         return
     if not args.identifier:
-        parser.error("provide a trusted knowledge-card identifier")
+        parser.error("provide a reviewed reproduction-spec identifier")
+    if args.action == "run" and not args.policy_file:
+        parser.error("--action run requires --policy-file; generate a reviewed template with --action policy-preview")
     try:
         model = configured_model()
         if args.action == "research":
@@ -85,13 +135,14 @@ def main():
                 bundle, retries=args.retries, timeout=args.timeout, keep=args.keep)
             print(json.dumps(plan.model_dump(), ensure_ascii=False, indent=2))
             return
+        policy = ExecutionPolicy.model_validate(json.loads(args.policy_file.read_text(encoding="utf-8"))) if args.policy_file else None
         project = args.project or f"lab-{uuid4().hex[:12]}"
         report_path = args.report or Path("reports") / f"{project}.json"
         pipeline = Pipeline(
             args.specs, args.workspace, project, llm=model,
             retries=args.retries, timeout=args.timeout, keep=args.keep,
             docker_engine=DockerEngine(), engine_timeout=args.engine_timeout,
-            auto_port=not args.fixed_port,
+            auto_port=not args.fixed_port, execution_policy=policy,
         )
         report = pipeline.run(args.identifier, report_path)
         print(json.dumps({

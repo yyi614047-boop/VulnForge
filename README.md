@@ -36,7 +36,7 @@ RAG, BM25, embedding indexes, the experimental source-driven runner, and the dup
 
 ## Transitional target inputs
 
-The runtime now reads reviewed YAML `ReproductionSpec` files through `TargetCatalog` from `reproductions/`. The old `knowledge/` directory and `KnowledgeBase` compatibility modules have been removed. `TargetSpec` remains a separate, untrusted description of upstream target material; `ExecutionPolicy` is the independent authorization contract. The CLI and Pipeline still need the final TargetSpec/ExecutionPolicy execution gate before the new target corpus can directly drive reproduction.
+The runtime now reads reviewed YAML `ReproductionSpec` files through `TargetCatalog` from `reproductions/`. The old `knowledge/` directory and `KnowledgeBase` compatibility modules have been removed. `TargetSpec` remains a separate, untrusted description of upstream target material; `ExecutionPolicy` is the independent authorization contract. The CLI emits a policy template with `--action policy-preview`; a reviewed `ExecutionPolicy` JSON file is mandatory for `run`. The Pipeline converts planner output into `ExecutionPlan`, validates target and reproduction fingerprints plus allowed actions, and the Executor revalidates the same domain plan before opening the lab.
 
 The upstream Vulhub corpus now lives under `targets/vulhub/` as untrusted target material. `VulhubTargetLoader` converts environments into `TargetSpec` candidates; it never grants execution permission. Use `--action target-search` or `--action target-inspect` to explore candidates, and `--action request-validate` to validate a `ReproductionRequest`.
 
@@ -69,7 +69,9 @@ python -m app.cli --action target-inspect --environment druid/CVE-2021-25646
 python -m app.cli --action engine --check-only
 python -m app.cli CVE-2021-25646 --specs reproductions --action research
 python -m app.cli CVE-2021-25646 --specs reproductions --action plan
-python -m app.cli CVE-2021-25646 --specs reproductions --action run
+python -m app.cli CVE-2021-25646 --specs reproductions --action policy-preview
+# Review/edit the emitted policy template, then save it as a JSON file
+python -m app.cli CVE-2021-25646 --specs reproductions --action run --policy-file policies/local.json
 ```
 
 Use `--specs` to point to a directory containing reviewed YAML reproduction specifications. The repository does not ship reviewed reproduction recipes for every Vulhub environment; upstream Markdown/Compose material alone is not execution authorization. Use a new report path for each run. The default report location is `reports/<project>.json`.

@@ -11,7 +11,7 @@ from app.domain.targets import DomainModel, TargetSpec
 class ExecutionPolicy(DomainModel):
     policy_id: str = Field(min_length=1, max_length=128)
     approved_target_hashes: dict[str, str] = Field(min_length=1, max_length=500)
-    approved_reproduction_hashes: dict[str, str] = Field(min_length=1, max_length=500)
+    approved_reproduction_hashes: dict[str, str] = Field(default_factory=dict, max_length=500)
     allowed_actions: set[ExecutionAction] = Field(min_length=1, max_length=32)
     retryable_actions: set[ExecutionAction] = Field(default_factory=set)
     allowed_services: set[str] = Field(min_length=1, max_length=100)

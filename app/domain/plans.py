@@ -55,7 +55,7 @@ class ExecutionPlan(DomainModel):
             visited.add(step.step_id)
         return self
 
-    def validate_policy(self, policy, target: TargetSpec, reproduction_spec: ReproductionSpec):
+    def validate_policy(self, policy, target: TargetSpec, reproduction_spec: ReproductionSpec | None = None):
         if self.policy_id != policy.policy_id:
             raise PermissionError("Plan policy binding does not match the active policy")
         if self.target_id != target.target_id:

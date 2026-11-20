@@ -101,3 +101,21 @@ def test_execution_plan_requires_known_topologically_ordered_dependencies():
             steps=[ExecutionStep(step_id="probe", phase="reproduce", action="http", target_id=selected.target_id,
                                  depends_on=["missing"], timeout_seconds=30, rationale="Probe")],
         )
+
+
+def test_reproduction_spec_fingerprint_is_bound_by_execution_policy():
+    from app.domain.reproduction import Probe, ReproductionSpec
+
+    selected = target()
+    spec = ReproductionSpec(
+        id=selected.target_id, title="Demo reproduction", product="demo",
+        affected_versions=["1.0"], dependencies=["docker"], prerequisites=["local lab"],
+        sources=["README.md"], environment="compose.yml", service="web", port=8080,
+        health=Probe(id="health", path="/health"),
+        reproduction=[Probe(id="repro", path="/poc", body_contains="vulnerable")],
+    )
+    p = policy(selected, approved_reproduction_hashes={spec.id: spec.fingerprint()})
+    p.authorize_target(selected, spec)
+    changed = spec.model_copy(update={"title": "Changed reproduction"})
+    with pytest.raises(PermissionError, match="specification"):
+        p.authorize_target(selected, changed)
