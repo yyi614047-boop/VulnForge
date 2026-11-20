@@ -30,12 +30,13 @@ class Synthesis(StrictModel):
 class Researcher:
     """Load authoritative local sources without BM25, embeddings, or vector search."""
 
-    def __init__(self, knowledge: Path, llm=None, *, max_chars=24000):
+    def __init__(self, knowledge: Path, llm=None, *, max_chars=24000, poc_discovery=None):
         self.knowledge = Path(knowledge).resolve()
         self.llm = llm.with_structured_output(Synthesis) if llm else None
         if max_chars < 100:
             raise ValueError("Research context budget must be at least 100 characters")
         self.max_chars = max_chars
+        self.poc_discovery = poc_discovery
 
     @agent_session
     def research(self, identifier: str) -> dict:
@@ -94,6 +95,18 @@ class Researcher:
                 if fact.citation not in source_text or fact.quote not in source_text[fact.citation]:
                     raise ValueError("Research model returned an invalid citation or quote")
 
+        poc_candidates = []
+        poc_discovery_status = "not_requested"
+        if self.poc_discovery is not None:
+            # Discovery is opt-in. Fail closed if the requested provider is
+            # unavailable; do not silently turn a provider error into no PoCs.
+            poc_candidates = [
+                item.model_dump(mode="json")
+                for item in self.poc_discovery.search_and_inspect(card.id, limit=10)
+            ]
+            poc_discovery_status = "completed" if poc_candidates else "no_candidates"
+        poc_candidates_hash = digest(json.dumps(poc_candidates, sort_keys=True))
+
         return {
             "card": card.model_dump(),
             "compose": config,
@@ -104,4 +117,7 @@ class Researcher:
             "generation": "model" if self.llm else "source_documents",
             "card_hash": card.fingerprint(),
             "compose_hash": digest(json.dumps(config, sort_keys=True)),
+            "poc_candidates": poc_candidates,
+            "poc_candidates_hash": poc_candidates_hash,
+            "poc_discovery_status": poc_discovery_status,
         }
