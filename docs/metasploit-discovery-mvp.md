@@ -59,3 +59,37 @@ finally:
 - Not implemented: production deployment orchestration or container network isolation.
 
 Module descriptions and options are untrusted external data. Discovery output is a candidate list, not proof that a module applies to a target or permission to run it.
+
+
+## Target compatibility assessment
+
+Compare every discovered candidate with a reviewed reproduction specification:
+
+```bash
+vulnforge --action metasploit-assess CVE-2021-44228-log4j
+```
+
+The positional identifier is the reproduction-spec ID. The command loads its TargetSpec and ReproductionSpec, searches Metasploit for the target CVE (or accepts `--cve` explicitly), inspects each returned module, and prints a compatibility assessment.
+
+Optional flags:
+
+```bash
+vulnforge --action metasploit-assess CVE-2021-44228-log4j --candidate-limit 10
+vulnforge --action metasploit-assess CVE-2021-44228-log4j --cve CVE-2021-44228
+```
+
+Assessment statuses:
+
+- `compatible`: explicit CVE, product, and affected-version evidence align.
+- `partial`: some evidence aligns, but one or more important signals are unknown.
+- `incompatible`: explicit module CVE references conflict with the target CVE.
+- `unknown`: there is not enough evidence to assess the candidate.
+
+This is intentionally conservative. Metasploit module rank is not target compatibility. A CVE search hit is not proof that the module applies to a target. Module metadata often omits affected product versions, so a result may remain `partial`; that is preferable to inventing certainty. The command is read-only and does not invoke module check or exploit execution.
+
+## Current compatibility MVP scope
+
+- Implemented: explicit CVE-reference comparison, product-name signal, affected-version text signal, and remote-host/port option presence.
+- Implemented: per-candidate explanations, matched/unknown/mismatch signals, and next-step guidance.
+- Implemented: CLI assessment against a reviewed reproduction spec.
+- Not implemented: fuzzy product/version matching, target fingerprinting, automated option population, module Check, exploit execution, or LangGraph routing.
