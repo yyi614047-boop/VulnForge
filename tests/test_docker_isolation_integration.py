@@ -8,6 +8,8 @@ from uuid import uuid4
 
 import pytest
 
+from app.environments.docker.manager import DockerLab, DockerLabParams
+
 
 pytestmark = pytest.mark.skipif(
     os.getenv("VULNFORGE_DOCKER_INTEGRATION") != "1",
@@ -68,3 +70,62 @@ def test_internal_network_allows_lab_peer_and_blocks_external_egress():
     finally:
         docker("rm", "-f", target, msf)
         docker("network", "rm", network)
+
+def test_docker_lab_resolves_target_only_from_live_internal_network(tmp_path):
+    suffix = uuid4().hex[:10]
+    project = f"lab-it-{suffix}"
+    network = f"vf-lab-{suffix}"
+    msf = f"vf-msf-{suffix}"
+    image = os.getenv("VULNFORGE_DOCKER_TEST_IMAGE", "busybox:1.36.1")
+
+    if docker("info", timeout=10).returncode:
+        pytest.skip("Docker daemon is unavailable")
+    if docker("image", "inspect", image).returncode:
+        pulled = docker("pull", image, timeout=180)
+        if pulled.returncode:
+            pytest.skip(f"Cannot obtain integration image: {pulled.stderr[-500:]}")
+
+    compose = tmp_path / "compose.json"
+    config = {
+        "services": {
+            "web": {
+                "image": image,
+                "ports": ["127.0.0.1:18080:8080/tcp"],
+                "networks": ["isolated"],
+                "command": [
+                    "sh", "-c",
+                    "mkdir -p /www && echo target-ok >/www/index.html && httpd -f -p 8080 -h /www",
+                ],
+            },
+        },
+        "networks": {
+            "isolated": {"internal": True, "name": network},
+        },
+    }
+    compose.write_text(json.dumps(config), encoding="utf-8")
+    lab = DockerLab(compose, project)
+    try:
+        result = lab.run(DockerLabParams(action="up", timeout=60))
+        assert result.evidence["exit_code"] == 0
+        msf_run = docker("run", "-d", "--name", msf, "--network", network, image, "sleep", "60")
+        assert msf_run.returncode == 0, msf_run.stderr
+
+        endpoint = lab.resolve_target_endpoint(
+            "web", 18080, network_name=network, metasploit_container=msf,
+        )
+        assert endpoint["target_host"].startswith("172.")
+        assert endpoint["host"] == endpoint["target_host"]
+        assert endpoint["target_port"] == 8080
+        assert endpoint["port"] == 8080
+        assert endpoint["network_internal"] is True
+        assert endpoint["target_networks"] == [network]
+        assert endpoint["metasploit_networks"] == [network]
+        assert endpoint["compose_sha256"] == __import__("hashlib").sha256(
+            json.dumps(config, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+    finally:
+        docker("rm", "-f", msf)
+        try:
+            lab.run(DockerLabParams(action="down", timeout=30))
+        except Exception:
+            pass
