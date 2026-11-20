@@ -19,7 +19,8 @@ from app.targets.vulhub.catalog import TargetCatalog
 
 class Pipeline:
     def __init__(self, knowledge: Path, workspace: Path, project: str, *, llm=None, retries=1, timeout=60, keep=False, executor_options=None,
-                 docker_engine=None, engine_timeout=120, execution_policy: ExecutionPolicy | None = None,\n                 poc_discovery=None):
+                 docker_engine=None, engine_timeout=120, execution_policy: ExecutionPolicy | None = None,
+                 poc_discovery=None):
         """初始化组件及其运行所需的配置、依赖和状态。"""
         self._run_lock = Lock()
         self.knowledge, self.workspace, self.project = knowledge, workspace, project
