@@ -1,4 +1,4 @@
-﻿"""Core CLI for knowledge retrieval and local lab runs."""
+﻿"""CLI for source-grounded local vulnerability reproduction runs."""
 import argparse
 import json
 import re
@@ -6,17 +6,15 @@ from pathlib import Path
 from uuid import uuid4
 
 from app.lab.vulhub_run import VulhubRun, source_model
-from app.rag.index import RetrievalIndex
-from app.rag.providers import ConfiguredEmbeddings
 from app.tools.docker_engine import DockerEngine
 from app.tools.vulhub_sources import VulhubSources
-from app.rag.vulhub_researcher import VulhubResearcher
+from app.lab.vulhub_researcher import VulhubResearcher
 
 
 def main():
     """解析命令行参数并分派检索、规划或实验运行命令。"""
     parser = argparse.ArgumentParser(description=__doc__)
-    actions = ["engine", "index", "search", "research", "plan", "run", "inspect"]
+    actions = ["engine", "search", "research", "plan", "run", "inspect"]
     parser.add_argument("subject", nargs="?", help="CVE identifier or legacy action")
     parser.add_argument("query", nargs="?", default="", help="Argument for a legacy action")
     parser.add_argument("--action", choices=actions)
@@ -32,10 +30,8 @@ def main():
     parser.add_argument("--engine-timeout", type=int, default=120, choices=range(1, 301), metavar="SECONDS")
     parser.add_argument("--check-only", action="store_true", help="Check Docker without starting it")
     parser.add_argument("--fixed-port", action="store_true")
-    parser.add_argument("--index", type=Path)
-    parser.add_argument("--dense", action="store_true", help="Enable hybrid retrieval")
     parser.add_argument("--model", action="store_true", help="Use a model for research and planning")
-    parser.add_argument("--top-k", type=int, default=6)
+    parser.add_argument("--limit", type=int, default=6)
     parser.add_argument("--card-id")
     parser.add_argument("--product")
     parser.add_argument("--version")
@@ -68,17 +64,9 @@ def main():
             if args.action == "search":
                 query = " ".join(filter(None, [args.query, args.product, args.version, args.card_id]))
                 result = VulhubSources(args.knowledge).registry().call(
-                    "search_vulhub_environments", {"query": query, "limit": args.top_k}).evidence
+                    "search_vulhub_environments", {"query": query, "limit": args.limit}).evidence
             else:
                 result = VulhubResearcher(args.knowledge, source_model() if args.model else None).research(args.query)
-            print(json.dumps(result, ensure_ascii=False, indent=2))
-            return
-
-        index_path = args.index or args.workspace / "rag.sqlite"
-        if args.action == "index":
-            embedder = ConfiguredEmbeddings() if args.dense else None
-            index = RetrievalIndex(args.knowledge, index_path, embedder)
-            result = index.build()
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return
 
