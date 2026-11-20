@@ -32,8 +32,9 @@ schema-validated plan with exact source quotes. The runner snapshots the
 environment into `.labs`, binds published ports to loopback, and executes the
 plan in order without an LLM feedback loop. Verification searches Metasploit
 for modules tagged with the CVE and invokes each module's native `check`
-method. No matching module, unsupported checks, and ambiguous outcomes are
-reported as `unsupported` or `inconclusive`, never as success. Execution,
+method (the first implementation does not execute exploit payloads). No
+matching module, unsupported checks, and ambiguous outcomes are reported as
+`unsupported` or `inconclusive`, never as success. Execution,
 Metasploit output and cleanup evidence are saved in the report.
 
 Each report has a sibling `<report-stem>.trace.jsonl` containing timestamped
@@ -92,6 +93,7 @@ part of the primary deterministic reproduction path.
 - [Generation, recovery, research, comparison and queues](docs/autonomous-workflow.md)
 - [Script tools, Docker builds and mounts](docs/script-tools.md)
 - [Retrieval, planning and execution architecture](docs/architecture.md)
+- [Markdown-first deterministic Metasploit flow](docs/deterministic-metasploit.md)
 - [Code reading guide (Chinese)](docs/code-reading-guide.md)
 
 ## Integration checks
