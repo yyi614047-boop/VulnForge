@@ -57,6 +57,7 @@ class StepExecutor:
         if not 0 <= recovery_budget <= 2:
             raise ValueError("Recovery budget must be 0..2")
         self.recovery_controller, self.recovery_budget = recovery_controller, recovery_budget
+        self.recovery_remaining = recovery_budget
         self.lab = None
         self.started = False
         self.locks = []
@@ -71,6 +72,7 @@ class StepExecutor:
         if self.report is not None:
             raise ValueError("Executor instances are single-run")
         self.plan = validate_deployment_plan(plan, bundle, retries=retries, timeout=timeout, keep=keep)
+        self.recovery_remaining = self.recovery_budget
         self.card, self.bundle = Card.model_validate(bundle["card"]), bundle
         # Detect source changes between research and execution, before side effects.
         current = self.kb.get(self.card.id)
@@ -142,7 +144,6 @@ class StepExecutor:
             self.report["status"] = "cancelled"
             self.save()
             return
-        recovery_attempts = 0
         total_attempts = step.max_retries + self.recovery_budget + 1
         for number in range(total_attempts):
             attempt = {"number": number + 1, "started_at": datetime.now(timezone.utc).isoformat(), "status": "running"}
@@ -160,14 +161,14 @@ class StepExecutor:
                 planned_retry = exc.retryable and number < step.max_retries and not self.cancel.is_set()
                 recovery_retry = False
                 if (not planned_retry and exc.retryable and self.recovery_controller is not None
-                        and recovery_attempts < self.recovery_budget and not self.cancel.is_set()):
-                    recovery_attempts += 1
+                        and self.recovery_remaining > 0 and not self.cancel.is_set()):
                     try:
                         decision = self.recovery_controller.decide(
                             step=step, failure=exc, attempt=number + 1,
-                            retry_allowed=True, remaining_budget=self.recovery_budget - recovery_attempts + 1,
+                            retry_allowed=True, remaining_budget=self.recovery_remaining,
                             recent_events=self.report["events"][-10:],
                         )
+                        self.recovery_remaining -= 1
                         recovery_retry = decision.action == "retry"
                         self.report["events"].append({
                             "step_id": step.id, "action": "recovery_decision",
@@ -175,6 +176,7 @@ class StepExecutor:
                             "attempt": number + 1,
                         })
                     except Exception as decision_error:
+                        self.recovery_remaining = max(0, self.recovery_remaining - 1)
                         self.report["events"].append({
                             "step_id": step.id, "action": "recovery_error",
                             "reason": str(decision_error), "fallback": "abort",
