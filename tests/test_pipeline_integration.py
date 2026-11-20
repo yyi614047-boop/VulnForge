@@ -82,7 +82,7 @@ def test_pipeline_executes_domain_plan_with_policy_and_independent_verifier(tmp_
 
     report_path = tmp_path / "reports" / "run.json"
     pipeline = Pipeline(
-        specs, tmp_path / "workspace", "test-project",
+        specs, tmp_path / "workspace", "lab-test-project",
         llm=None, retries=1, timeout=30,
         execution_policy=policy,
         executor_options={"lab_factory": lab_factory, "requester": requester, "sleeper": lambda _: None},
@@ -113,7 +113,7 @@ def test_pipeline_fails_closed_without_policy_before_environment_side_effects(tm
         return FakeDockerLab()
 
     pipeline = Pipeline(
-        specs, tmp_path / "workspace", "denied-project",
+        specs, tmp_path / "workspace", "lab-denied-project",
         llm=None, executor_options={"lab_factory": lab_factory},
     )
     report = pipeline.run(spec.id, tmp_path / "denied.json")
