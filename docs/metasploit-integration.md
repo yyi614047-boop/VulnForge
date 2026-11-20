@@ -104,3 +104,50 @@ The compatibility gate rejects non-Metasploit/non-exploit candidates, uninspecte
 **Compatibility remains `unknown` unless independent product/version evidence exists.** Metasploit's target labels and rank are retained as metadata, but are not treated as proof that the module supports the lab's product/version.
 
 The spec always carries `approval_required=true`. This milestone only constructs and validates a review proposal; it does not invoke `check`, `exploit`, RPC, payloads, or sessions. Execution remains blocked until a separately authorized RPC adapter and explicit policy gate are implemented.
+
+
+## Policy-gated RPC adapter (fourth milestone)
+
+The optional `app/execution/metasploit_rpc.py` adapter uses Metasploit's HTTP MessagePack RPC API. Install the optional dependency with:
+
+```bash
+pip install -e ".[metasploit]"
+```
+
+Start the Metasploit Framework RPC daemon bound to loopback, for example:
+
+```bash
+msfrpcd -U vulnforge -P '<strong-password>' -a 127.0.0.1 -p 55553 -S -f
+```
+
+Configure credentials through environment variables (never commit them):
+
+- `MSFRPC_HOST=127.0.0.1`
+- `MSFRPC_PORT=55553`
+- `MSFRPC_SSL=true`
+- `MSFRPC_URI=/api/`
+- `MSFRPC_USER`
+- `MSFRPC_PASS`
+
+The adapter exposes no arbitrary console/RPC passthrough. It only supports the named flow:
+1. `module.check` on an inspected exploit with Check support;
+2. wait for the module result and require the exact `vulnerable` result code;
+3. `module.execute` only when the same adapter instance has recorded that successful check;
+4. inspect newly created sessions and stop only sessions matching the exact target host and exploit module.
+
+The RPC endpoint itself must be loopback. TLS certificate verification is enabled by default. The transport accepts no non-loopback RPC host.
+
+### Additional explicit policy fields
+
+All Metasploit permissions default to disabled. A reviewed policy must include the exact candidate ID and inspected metadata SHA-256 in `approved_poc_candidates`, then explicitly enable the required flags:
+
+- `allow_metasploit_check`
+- `allow_metasploit_execute`
+- `allow_unknown_poc_compatibility` (only if the reviewer accepts unknown product/version compatibility)
+- `allow_metasploit_payloads` (only when a reviewed module requires a payload option)
+
+The active policy must also approve the target fingerprint, loopback host, and published port. A changed module metadata hash invalidates candidate approval.
+
+### Current limitations
+
+This adapter is not yet wired into LangGraph's Executor or CLI. Its RPC and policy behavior is unit-tested with a fake client; no live Metasploit daemon/module has been exercised by CI. Automatic candidate fallback and end-to-end verifier/report integration are the next milestones.
