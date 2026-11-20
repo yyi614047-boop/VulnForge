@@ -25,6 +25,7 @@ from app.domain.plans import ExecutionPlan, ExecutionStep
 from app.domain.policies import ExecutionPolicy
 from app.domain.targets import TargetSpec
 from app.domain.reproduction import ReproductionSpec
+from app.agents.planner import validate_execution_plan
 
 
 def atomic_json(path: Path, payload):
@@ -96,7 +97,14 @@ class StepExecutor:
             raise PermissionError("Reproduction specification changed after policy validation")
         if current_target.fingerprint() != target_spec.fingerprint():
             raise PermissionError("Target sources or environment changed after policy validation")
-        plan.validate_policy(execution_policy, current_target, current)
+        validated = validate_execution_plan(
+            plan, bundle, current_target, current, execution_policy,
+            retries=max((step.retries for step in plan.steps), default=0),
+            timeout=max((step.timeout_seconds for step in plan.steps), default=60),
+            keep=any(step.action == "keep" for step in plan.steps),
+        )
+        if validated.model_dump(mode="json") != plan.model_dump(mode="json"):
+            raise PermissionError("Execution plan failed canonical validation")
         for step in plan.steps:
             execution_policy.authorize_action(step.action, timeout_seconds=step.timeout_seconds, retries=step.retries)
         self.recovery_budget = min(self.recovery_budget, execution_policy.max_recovery_actions)
@@ -105,7 +113,7 @@ class StepExecutor:
         self.execution_policy, self.target_spec, self.reproduction_spec = execution_policy, current_target, current
         self.card, self.bundle = Card.model_validate(bundle["card"]), bundle
         config = load_compose(self.kb.environment(current))
-        if digest(current.model_dump_json()) != expected["reproduction"] or digest(json.dumps(config, sort_keys=True)) != expected["compose"]:
+        if current.fingerprint() != expected["reproduction"] or digest(json.dumps(config, sort_keys=True)) != expected["compose"]:
             raise ValueError("Research inputs changed since planning; research and plan again")
         if digest(json.dumps(collect_assets(self.kb, current, config), sort_keys=True)) != expected["assets"]:
             raise ValueError("Build, mount or script inputs changed since planning")
