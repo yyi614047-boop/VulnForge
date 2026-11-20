@@ -110,7 +110,7 @@ class StructuredPlanner:
         if bundle["synthesis"]["missing_information"]:
             raise ValueError("Research reports missing or conflicting information; resolve before planning")
         card = Card.model_validate(bundle["card"])
-        citation = bundle["retrieval"]["hits"][0]["id"]
+        citation = bundle["evidence"]["hits"][0]["id"]
         actions = lifecycle(bundle, keep)
         steps = []
         for number, (phase, action, probe) in enumerate(actions):
