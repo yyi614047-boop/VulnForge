@@ -165,8 +165,7 @@ class Pipeline:
             from app.lab.ports import prepare_port
             try:
                 self.knowledge, self.port_selection = prepare_port(self.knowledge, self.workspace, identifier)
-                if self.port_selection["changed"]:
-                    
+                self.researcher.knowledge = self.knowledge
             except (ValueError, OSError) as exc:
                 report = {"id": identifier, "status": "information_missing", "cleanup": "not_needed", "error": str(exc)}
                 atomic_json(report_path, report)
