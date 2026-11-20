@@ -1,6 +1,7 @@
 """Content-addressed target and execution artifacts."""
 import ast
 import hashlib
+from pathlib import Path
 import shutil
 from app.tools.builtin.filesystem import local_path, file_hash
 from app.environments.docker.manager import environment_assets
