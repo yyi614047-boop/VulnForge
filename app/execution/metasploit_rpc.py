@@ -208,9 +208,24 @@ class MetasploitRpcAdapter:
     def check(self, spec: PoCExecutionSpec, candidate: PoCCandidate,
               target: TargetSpec, policy: ExecutionPolicy, *, timeout: int = 60) -> MetasploitCheckOutcome:
         self._validate_binding(spec, candidate, target, policy, "check")
-        if candidate.check_supported is not True:
-            raise PermissionError("Module metadata does not explicitly confirm Check support")
-        response = self.client.call("module.check", "exploit", self._module_name(spec), spec.options)
+        try:
+            response = self.client.call("module.check", "exploit", self._module_name(spec), spec.options)
+        except MetasploitRpcError as exc:
+            # Metasploit's RPC API reports unsupported check methods as a
+            # module error. Preserve that as a typed candidate outcome so the
+            # caller can move to the next existing module.
+            if "does not implement a check method" in str(exc).lower() or "unsupported" in str(exc).lower():
+                return MetasploitCheckOutcome(
+                    candidate_id=candidate.candidate_id,
+                    module_metadata_sha256=candidate.metadata_sha256,
+                    target_id=target.target_id,
+                    target_fingerprint=target.fingerprint(),
+                    job_uuid="unsupported",
+                    status="failed",
+                    result_code="unsupported",
+                    result={"message": str(exc)},
+                )
+            raise
         job_id, job_uuid = self._ticket(response)
         completed = self._wait_for_result(job_id, job_uuid, timeout)
         result = completed.get("result") or {}
