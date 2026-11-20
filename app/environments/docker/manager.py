@@ -4,6 +4,7 @@ Only a deliberately small Compose subset is accepted. Documents are data, never
 shell scripts. Container readiness does not imply vulnerability reproduction.
 """
 
+import ipaddress
 import json
 import re
 import subprocess
@@ -302,7 +303,7 @@ class DockerLab:
         return {**evidence, "service": service, "path": path}
 
 
-    def resolve_target_endpoint(self, service: str, published_port: int, *, timeout: int = 15) -> dict:
+    def resolve_target_endpoint(self, service: str, published_port: int, *, network_name: str, timeout: int = 15) -> dict:
         """Resolve one running Compose service to its private container IP/port.
 
         The published port must be explicitly bound to loopback in the reviewed
@@ -315,7 +316,7 @@ class DockerLab:
         declared = config["services"][service].get("ports", [])
         if not any(
             isinstance(item, str)
-            and re.fullmatch(rf"127\\.0\\.0\\.1:{published_port}:[0-9]+/tcp", item)
+            and re.fullmatch(rf"127\.0\.0\.1:{published_port}:[0-9]+/tcp", item)
             for item in declared
         ):
             raise ValueError("Target port must be explicitly published on loopback as TCP")
@@ -349,19 +350,13 @@ class DockerLab:
             if len(matches) != 1:
                 raise ValueError("Published target port does not resolve to exactly one TCP container port")
             networks = row.get("NetworkSettings", {}).get("Networks") or {}
-            endpoints = []
-            for network_name, network in networks.items():
-                address = network.get("IPAddress")
-                if not address:
-                    continue
-                ip = ipaddress.ip_address(address)
-                if ip.is_private and not ip.is_loopback and not ip.is_link_local:
-                    endpoints.append((str(network_name), str(ip)))
-            if not endpoints:
-                raise ValueError("Target container has no private, non-loopback IPv4 network address")
-            # Stable ordering makes the selected endpoint deterministic.
-            endpoints.sort()
-            network_name, address = endpoints[0]
+            network = networks.get(network_name)
+            if not isinstance(network, dict) or not network.get("IPAddress"):
+                raise ValueError("Target container is not attached to the requested Metasploit network")
+            ip = ipaddress.ip_address(network["IPAddress"])
+            if ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local:
+                raise ValueError("Selected target network must provide a private, non-loopback IPv4 address")
+            address = str(ip)
             return {
                 "project": self.project,
                 "service": service,
