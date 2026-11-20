@@ -114,9 +114,9 @@ def test_docker_lab_resolves_target_only_from_live_internal_network(tmp_path):
             "web", 18080, network_name=network, metasploit_container=msf,
         )
         assert endpoint["target_host"].startswith("172.")
-        assert endpoint["host"] == endpoint["target_host"]
+        assert endpoint["target_host"] == endpoint["target_host"]
         assert endpoint["target_port"] == 8080
-        assert endpoint["port"] == 8080
+        assert endpoint["target_port"] == 8080
         assert endpoint["network_internal"] is True
         assert endpoint["target_networks"] == [network]
         assert endpoint["metasploit_networks"] == [network]

@@ -80,8 +80,8 @@ def test_resolves_private_endpoint_only_on_explicit_internal_network(tmp_path):
     endpoint = lab.resolve_target_endpoint(
         "app", 18080, network_name="lab-shared", metasploit_container="msf",
     )
-    assert endpoint["host"] == "172.20.0.2"
-    assert endpoint["port"] == 8080
+    assert endpoint["target_host"] == "172.20.0.2"
+    assert endpoint["target_port"] == 8080
     assert endpoint["metasploit_host"] == "172.20.0.3"
     assert endpoint["network_internal"] is True
     assert endpoint["network_id"] == "a" * 64
