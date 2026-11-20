@@ -165,6 +165,19 @@ class MetasploitRpcAdapter:
                 raise PermissionError(f"{name} must be bound to the approved target host")
         if "RPORT" in options and spec.options.get("RPORT") != str(spec.target_port):
             raise PermissionError("RPORT must be bound to the approved target port")
+        for name in ("LHOST", "SRVHOST"):
+            if name in spec.options and spec.options[name] not in policy.allowed_hosts:
+                raise PermissionError(f"{name} must use an explicitly allowed loopback host")
+        for name in ("LPORT", "SRVPORT"):
+            if name in spec.options:
+                try:
+                    callback_port = int(spec.options[name])
+                except ValueError as exc:
+                    raise PermissionError(f"{name} must be a valid port") from exc
+                if callback_port not in policy.allowed_ports:
+                    raise PermissionError(f"{name} must use an explicitly allowed port")
+        if "PAYLOAD" in spec.options and not policy.allow_metasploit_payloads:
+            raise PermissionError("Metasploit payload selection is disabled by execution policy")
         policy.authorize_metasploit_candidate(
             candidate.candidate_id, candidate.metadata_sha256, action=action,
             compatibility_status=spec.compatibility_status,
@@ -234,9 +247,17 @@ class MetasploitRpcAdapter:
         before_sessions = self.client.call("session.list") or {}
         response = self.client.call("module.execute", "exploit", self._module_name(spec), spec.options)
         job_id, job_uuid = self._ticket(response)
-        completed = self._wait_for_result(job_id, job_uuid, timeout)
-        after_sessions = self.client.call("session.list") or {}
-        stopped = self._stop_new_target_sessions(before_sessions, after_sessions, spec)
+        stopped = []
+        try:
+            completed = self._wait_for_result(job_id, job_uuid, timeout)
+        finally:
+            # Always attempt to stop only sessions created by this module for
+            # this exact target during this invocation, including timeout paths.
+            try:
+                after_sessions = self.client.call("session.list") or {}
+                stopped = self._stop_new_target_sessions(before_sessions, after_sessions, spec)
+            except Exception:
+                stopped = []
         result = completed.get("result") or {}
         return MetasploitExecutionOutcome(
             candidate_id=candidate.candidate_id,
