@@ -35,7 +35,6 @@ def _parser():
     parser.add_argument("--keep", action="store_true")
     parser.add_argument("--engine-timeout", type=int, default=120, choices=range(1, 301), metavar="SECONDS")
     parser.add_argument("--check-only", action="store_true")
-    parser.add_argument("--fixed-port", action="store_true")
     parser.add_argument("--inspect", type=Path, help="Existing JSON report to inspect")
     return parser
 
@@ -153,7 +152,7 @@ def main():
             args.specs, args.workspace, project, llm=model,
             retries=args.retries, timeout=args.timeout, keep=args.keep,
             docker_engine=DockerEngine(), engine_timeout=args.engine_timeout,
-            auto_port=False, execution_policy=policy,
+            execution_policy=policy,
         )
         report = pipeline.run(args.identifier, report_path)
         print(json.dumps({

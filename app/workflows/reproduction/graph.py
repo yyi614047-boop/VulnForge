@@ -19,7 +19,7 @@ from app.targets.vulhub.catalog import TargetCatalog
 
 class Pipeline:
     def __init__(self, knowledge: Path, workspace: Path, project: str, *, llm=None, retries=1, timeout=60, keep=False, executor_options=None,
-                 docker_engine=None, engine_timeout=120, auto_port=False, execution_policy: ExecutionPolicy | None = None):
+                 docker_engine=None, engine_timeout=120, execution_policy: ExecutionPolicy | None = None):
         """初始化组件及其运行所需的配置、依赖和状态。"""
         self._run_lock = Lock()
         self.knowledge, self.workspace, self.project = knowledge, workspace, project
@@ -31,10 +31,7 @@ class Pipeline:
         self.executor = None
         self.active = False
         self.docker_engine, self.engine_timeout = docker_engine, engine_timeout
-        self.auto_port, self.port_selection = auto_port, None
         self.execution_policy = execution_policy
-        if execution_policy is not None and auto_port:
-            raise ValueError("Policy-bound runs require a fixed, fingerprinted target port; disable auto_port")
 
     @state_boundary(reads=['identifier'], writes=['bundle', 'status', 'error'])
     def research(self, state):
@@ -168,19 +165,9 @@ class Pipeline:
     def _run_isolated(self, identifier, report_path):
         """在隔离上下文中执行指定工作流引擎对应的一次实验。"""
         self.active = False
-        self.port_selection = None
         graph = self.graph()
         if report_path.exists():
             raise FileExistsError("Report exists; choose a new report path")
-        if self.auto_port:
-            from app.environments.docker.network import prepare_port
-            try:
-                self.knowledge, self.port_selection = prepare_port(self.knowledge, self.workspace, identifier)
-                self.researcher.knowledge = self.knowledge
-            except (ValueError, OSError) as exc:
-                report = {"id": identifier, "status": "information_missing", "cleanup": "not_needed", "error": str(exc)}
-                atomic_json(report_path, report)
-                return report
         executor_options = dict(self.executor_options)
         executor_options.setdefault("recovery_controller", self.recovery_controller)
         policy_recovery_budget = self.execution_policy.max_recovery_actions if self.execution_policy else 0
@@ -198,9 +185,6 @@ class Pipeline:
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 raise
         finally:
-            if "report" in state and self.port_selection:
-                state["report"]["port_selection"] = self.port_selection
-                atomic_json(report_path, state["report"])
             if "report" in state and not report_path.exists():
                 atomic_json(report_path, state["report"])
         return state["report"]

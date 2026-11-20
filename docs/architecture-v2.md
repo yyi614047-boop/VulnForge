@@ -215,11 +215,11 @@ No mass deletion or main-branch merge should happen before the relevant migratio
 - Added pure domain contracts for requests, targets, policies, plans, evidence, and reports.
 - Added a Vulhub target adapter that emits untrusted candidates and preserves source provenance.
 - Moved the upstream Vulhub corpus, including its license, to `targets/vulhub/`.
-- Added unit tests for domain invariants and target-loader path safety, plus a GitHub Actions unit-test workflow.
+- Added unit tests for domain invariants, target-loader path safety, policy enforcement, and a fake-Docker end-to-end Pipeline path; the latest CI run passed 29 tests.
 
 ### Pending before calling the migration complete
 
-- Move workflow, agent, execution, tool, and Docker environment implementations into the target package layout without duplicate implementations.
+- Finish the last import/dead-code audit and retain only thin compatibility wrappers for the old `app.lab` and `app.tools` paths.
 - Add container egress isolation so `network_scope` constrains Docker pull/build and container traffic, not only loopback HTTP probes.
 - Decide whether Metasploit is an optional check provider or corroborating verifier; do not make it mandatory before the safety contract is defined.
 - Run the CI suite and Docker-backed integration path, inspect the reports, and resolve all failures.
