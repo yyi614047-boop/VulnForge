@@ -261,5 +261,22 @@ Do not make Metasploit a mandatory runtime dependency until its adapter and secu
 - Primary vulnerable-environment source: Vulhub; native Vulhub PoCs are optional rather than assumed.
 - PoC authoring/generation: explicitly out of scope.
 - Separation of concerns: Researcher discovers and inspects; Planner selects and plans; deterministic policy authorizes; Executor invokes adapters; Verifier independently evaluates evidence; Recovery coordinates bounded retry/replan/backend-switch/abort.
-- Read-only Metasploit CVE discovery and module metadata inspection are implemented on the feature branch through `app/discovery/metasploit.py` and the `metasploit-search` / `metasploit-inspect` CLI actions. They are not yet part of the LangGraph Planner/Executor path.
-- Metasploit RPC execution and policy-bound checks remain unimplemented. A target-bound, review-only `PoCExecutionSpec` and deterministic compatibility gate have been added; neither authorizes execution.
+- Read-only Metasploit CVE discovery and module metadata inspection are implemented through `app/discovery/metasploit.py` and the `metasploit-search` / `metasploit-inspect` CLI actions.
+- The policy-gated RPC adapter and target-bound `PoCExecutionSpec` are implemented. The optional LangGraph stage now connects Planner selection to Check and conditionally Execute; independent verification still runs through the existing StepExecutor verifier. Live end-to-end validation against a running local Metasploit service and Docker lab remains outstanding.
+
+
+## Metasploit LangGraph execution stage
+
+The LangGraph run can optionally execute a Planner-selected Metasploit candidate. This is opt-in and restricted to the current loopback-only V1 policy boundary.
+
+- Discover candidates with `--discover-metasploit`.
+- Review the exact candidate metadata SHA-256 and add it to `approved_poc_candidates` in the policy file.
+- Explicitly set `allow_metasploit_check` and `allow_metasploit_execute` to `true`. Unknown product/version compatibility requires its own explicit policy approval.
+- Configure `MSFRPC_USER`, `MSFRPC_PASS`, and optionally `MSFRPC_HOST=127.0.0.1`, `MSFRPC_PORT=55553`, `MSFRPC_SSL=true`, `MSFRPC_URI=/api/`.
+- Run with both `--discover-metasploit` and `--enable-metasploit-execution`.
+
+The stage revalidates the plan, research-bundle fingerprint, target/reproduction fingerprints, and exact candidate metadata. It calls `module.check` first; `module.execute` is reachable only after a completed `vulnerable` check and the same adapter instance confirms the check binding. Safe results stop the Metasploit path; unsupported/unknown results remain inconclusive.
+
+The existing StepExecutor verification phase evaluates reviewed target assertions independently. A completed Metasploit job is not proof of vulnerability: final success still depends on independent evidence. Cleanup remains in the normal pipeline finalizer.
+
+The V1 integration uses the RPC adapter loopback target restriction. The private Docker-network endpoint resolver is available separately, but private-address attestation is not yet wired into the RPC authorization contract. Do not broaden policy to arbitrary private or public targets to work around this limitation.

@@ -1,4 +1,4 @@
-﻿"""LangGraph is the orchestration layer; components are independently testable."""
+"""LangGraph is the orchestration layer; components are independently testable."""
 from pathlib import Path
 from threading import Lock
 
@@ -15,12 +15,13 @@ from app.domain.plans import ExecutionPlan
 from app.domain.targets import TargetSpec
 from app.domain.reproduction import ReproductionSpec
 from app.targets.vulhub.catalog import TargetCatalog
+from app.workflows.reproduction.metasploit import MetasploitCandidateRunner
 
 
 class Pipeline:
     def __init__(self, knowledge: Path, workspace: Path, project: str, *, llm=None, retries=1, timeout=60, keep=False, executor_options=None,
                  docker_engine=None, engine_timeout=120, execution_policy: ExecutionPolicy | None = None,
-                 poc_discovery=None):
+                 poc_discovery=None, metasploit_adapter=None):
         """初始化组件及其运行所需的配置、依赖和状态。"""
         self._run_lock = Lock()
         self.knowledge, self.workspace, self.project = knowledge, workspace, project
@@ -33,6 +34,7 @@ class Pipeline:
         self.active = False
         self.docker_engine, self.engine_timeout = docker_engine, engine_timeout
         self.execution_policy = execution_policy
+        self.metasploit_adapter = metasploit_adapter
 
     @state_boundary(reads=['identifier'], writes=['bundle', 'status', 'error'])
     def research(self, state):
@@ -107,10 +109,46 @@ class Pipeline:
         except Exception as exc:
             return {"status": "environment_error", "error": str(exc), "engine": engine}
 
-    @state_boundary(reads=[], writes=['status'])
+    @state_boundary(reads=['status', 'plan', 'bundle', 'target_spec', 'reproduction_spec'], writes=['status', 'poc_execution', 'error'])
+    def metasploit(self, state):
+        """在本地实验范围内执行已审批的 Metasploit 候选。"""
+        if not self.active or self.executor.report.get("status") != "pending":
+            return {}
+        plan = ExecutionPlan.model_validate(state["plan"])
+        if not plan.selected_poc_candidate_id:
+            return {"poc_execution": {"status": "skipped", "reason": "Planner did not select a Metasploit candidate"}}
+        if self.metasploit_adapter is None:
+            result = {"status": "skipped", "reason": "Metasploit execution was not explicitly enabled"}
+            self.executor.report["metasploit"] = result
+            self.executor.save()
+            return {"poc_execution": result}
+        try:
+            target = TargetSpec.model_validate(state["target_spec"])
+            reproduction = ReproductionSpec.model_validate(state["reproduction_spec"])
+            result = MetasploitCandidateRunner(self.metasploit_adapter).run(
+                plan=plan, bundle=state["bundle"], target=target,
+                reproduction=reproduction, policy=self.execution_policy,
+            )
+            self.executor.report["metasploit"] = result
+            if result["status"] == "not_reproduced":
+                self.executor.report["status"] = "not_reproduced"
+            self.executor.save()
+            return {"poc_execution": result, "status": self.executor.report["status"]}
+        except PermissionError as exc:
+            self.executor.report.update(status="policy_denied", error=str(exc))
+            self.executor.report["metasploit"] = {"status": "policy_denied", "reason": str(exc)}
+            self.executor.save()
+            return {"status": "policy_denied", "error": str(exc)}
+        except Exception as exc:
+            self.executor.report.update(status="execution_error", error=str(exc))
+            self.executor.report["metasploit"] = {"status": "failed", "reason": str(exc)}
+            self.executor.save()
+            return {"status": "execution_error", "error": str(exc)}
+
+    @state_boundary(reads=['status'], writes=['status'])
     def reproduce(self, state):
         """执行复现阶段中的脚本或 HTTP 请求。"""
-        if self.active:
+        if self.active and self.executor.report.get("status") == "pending":
             self.executor.execute_phase("reproduce")
             return {"status": self.executor.report["status"]}
         return {}
@@ -140,13 +178,14 @@ class Pipeline:
         """构建 LangGraph 编排图并连接各实验阶段。"""
         from langgraph.graph import END, StateGraph
         graph = StateGraph(PipelineState)
-        names = ["researcher", "planner", "deployer", "reproducer", "verifier", "cleanup"]
-        for name, node in zip(names, [self.research, self.plan, self.deploy, self.reproduce, self.verification, self.cleanup]):
+        names = ["researcher", "planner", "deployer", "metasploit", "reproducer", "verifier", "cleanup"]
+        for name, node in zip(names, [self.research, self.plan, self.deploy, self.metasploit, self.reproduce, self.verification, self.cleanup]):
             graph.add_node(name, node)
         graph.set_entry_point("researcher")
         graph.add_conditional_edges("researcher", lambda s: "planner" if s["status"] == "researched" else "cleanup")
         graph.add_conditional_edges("planner", lambda s: "deployer" if s["status"] == "planned" else "cleanup")
-        graph.add_edge("deployer", "reproducer")
+        graph.add_edge("deployer", "metasploit")
+        graph.add_edge("metasploit", "reproducer")
         graph.add_edge("reproducer", "verifier")
         graph.add_edge("verifier", "cleanup")
         graph.add_edge("cleanup", END)

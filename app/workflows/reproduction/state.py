@@ -10,3 +10,4 @@ class PipelineState(TypedDict, total=False):
     error: str
     status: str
     engine: dict
+    poc_execution: dict
