@@ -19,11 +19,12 @@ from app.targets.vulhub.catalog import TargetCatalog
 
 class Pipeline:
     def __init__(self, knowledge: Path, workspace: Path, project: str, *, llm=None, retries=1, timeout=60, keep=False, executor_options=None,
-                 docker_engine=None, engine_timeout=120, execution_policy: ExecutionPolicy | None = None):
+                 docker_engine=None, engine_timeout=120, execution_policy: ExecutionPolicy | None = None,
+                 poc_discovery=None):
         """初始化组件及其运行所需的配置、依赖和状态。"""
         self._run_lock = Lock()
         self.knowledge, self.workspace, self.project = knowledge, workspace, project
-        self.researcher = Researcher(knowledge, llm)
+        self.researcher = Researcher(knowledge, llm, poc_discovery=poc_discovery)
         self.planner = StructuredPlanner(llm)
         self.recovery_controller = RecoveryController(llm) if llm is not None else None
         self.retries, self.timeout, self.keep = retries, timeout, keep
@@ -81,6 +82,7 @@ class Pipeline:
                 "reproduction": state["bundle"]["card_hash"],
                 "compose": state["bundle"]["compose_hash"],
                 "assets": state["bundle"]["assets_hash"],
+                "poc_candidates": state["bundle"].get("poc_candidates_hash", __import__("hashlib").sha256(b"[]").hexdigest()),
             }:
                 raise PermissionError("Plan provenance changed after planning")
         except Exception as exc:

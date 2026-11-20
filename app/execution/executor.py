@@ -88,6 +88,7 @@ class StepExecutor:
             "reproduction": bundle["card_hash"],
             "compose": bundle["compose_hash"],
             "assets": bundle["assets_hash"],
+            "poc_candidates": bundle.get("poc_candidates_hash", digest("[]")),
         }
         if plan.input_fingerprints != expected:
             raise PermissionError("Execution plan provenance differs from the research bundle")

@@ -28,6 +28,7 @@ def _parser():
     parser.add_argument("--module", help="Metasploit module path for metasploit-inspect")
     parser.add_argument("--msfconsole", default="msfconsole", help="Path to the msfconsole executable")
     parser.add_argument("--msf-timeout", type=int, default=180, choices=range(1, 901), metavar="SECONDS")
+    parser.add_argument("--discover-metasploit", action="store_true", help="Include read-only Metasploit candidates during research/planning")
     parser.add_argument("--environment", help="Relative target directory for target-inspect")
     parser.add_argument("--request-file", type=Path, help="JSON ReproductionRequest for request-validate")
     parser.add_argument("--policy-file", type=Path, help="Reviewed JSON ExecutionPolicy required for run")
@@ -153,7 +154,8 @@ def main():
     try:
         model = configured_model()
         if args.action == "research":
-            result = Researcher(args.specs, model).research(args.identifier)
+            discovery = MetasploitDiscovery(executable=args.msfconsole, timeout=args.msf_timeout) if args.discover_metasploit else None
+            result = Researcher(args.specs, model, poc_discovery=discovery).research(args.identifier)
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return
         policy = ExecutionPolicy.model_validate(json.loads(args.policy_file.read_text(encoding="utf-8"))) if args.policy_file else None
@@ -161,7 +163,8 @@ def main():
             catalog = TargetCatalog(args.specs)
             spec = catalog.get(args.identifier)
             target = catalog.to_target_spec(spec)
-            bundle = Researcher(args.specs, model).research(args.identifier)
+            discovery = MetasploitDiscovery(executable=args.msfconsole, timeout=args.msf_timeout) if args.discover_metasploit else None
+            bundle = Researcher(args.specs, model, poc_discovery=discovery).research(args.identifier)
             plan = StructuredPlanner(model).generate(
                 bundle, target=target, spec=spec, policy=policy,
                 retries=args.retries, timeout=args.timeout, keep=args.keep)
@@ -174,6 +177,7 @@ def main():
             retries=args.retries, timeout=args.timeout, keep=args.keep,
             docker_engine=DockerEngine(), engine_timeout=args.engine_timeout,
             execution_policy=policy,
+            poc_discovery=MetasploitDiscovery(executable=args.msfconsole, timeout=args.msf_timeout) if args.discover_metasploit else None,
         )
         report = pipeline.run(args.identifier, report_path)
         print(json.dumps({

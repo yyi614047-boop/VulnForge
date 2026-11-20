@@ -36,3 +36,12 @@ class PoCCandidate(BaseModel):
     metadata_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     metadata_excerpt: str = Field(default="", max_length=32000)
     inspected: bool = False
+
+
+class PoCSelectionProposal(BaseModel):
+    """LLM proposal only; application code must validate candidate membership."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    selected_candidate_id: str | None = Field(default=None, max_length=256)
+    rationale: str = Field(min_length=1, max_length=4000)
