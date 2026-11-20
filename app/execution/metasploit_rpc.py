@@ -72,7 +72,7 @@ class MessagePackHttpTransport:
         except (URLError, TimeoutError, OSError, ValueError) as exc:
             raise MetasploitRpcError(f"Metasploit RPC transport failed: {exc}") from exc
         if isinstance(payload, dict) and payload.get("error"):
-            raise MetasploitRpcError(str(payload["error"]))
+            raise MetasploitRpcError(str(payload.get("error_message") or payload.get("error_class") or payload["error"]))
         return payload
 
 
@@ -115,7 +115,7 @@ class MetasploitRpcClient:
             self.token = str(auth["token"])
         response = self.transport.call(method, self.token, *params)
         if isinstance(response, dict) and response.get("error"):
-            raise MetasploitRpcError(str(response["error"]))
+            raise MetasploitRpcError(str(response.get("error_message") or response.get("error_class") or response["error"]))
         return response
 
 
@@ -273,6 +273,7 @@ class MetasploitRpcAdapter:
         response = self.client.call("module.execute", "exploit", self._module_name(spec), spec.options)
         job_id, job_uuid = self._ticket(response)
         stopped = []
+        cleanup_errors = []
         try:
             completed = self._wait_for_result(job_id, job_uuid, timeout)
         finally:
@@ -280,17 +281,18 @@ class MetasploitRpcAdapter:
             # this exact target during this invocation, including timeout paths.
             try:
                 after_sessions = self.client.call("session.list") or {}
-                stopped = self._stop_new_target_sessions(before_sessions, after_sessions, spec)
-            except Exception:
-                stopped = []
+                stopped, cleanup_errors = self._stop_new_target_sessions(before_sessions, after_sessions, spec)
+            except Exception as exc:
+                cleanup_errors.append(f"Could not inspect sessions for cleanup: {exc}")
         result = completed.get("result") or {}
         return MetasploitExecutionOutcome(
             candidate_id=candidate.candidate_id,
             target_id=target.target_id,
             job_uuid=job_uuid,
-            status="completed",
+            status="failed" if cleanup_errors else "completed",
             result=result if isinstance(result, dict) else {"value": str(result)},
             cleaned_session_ids=stopped,
+            cleanup_errors=cleanup_errors,
         )
 
     @staticmethod
@@ -304,8 +306,9 @@ class MetasploitRpcAdapter:
         return job_id, response["uuid"]
 
     def _stop_new_target_sessions(self, before: dict, after: dict,
-                                  spec: PoCExecutionSpec) -> list[int]:
+                                  spec: PoCExecutionSpec) -> tuple[list[int], list[str]]:
         stopped = []
+        errors = []
         module_name = self._module_name(spec)
         for raw_id, session in after.items():
             if str(raw_id) in {str(key) for key in before} or not isinstance(session, dict):
@@ -318,6 +321,6 @@ class MetasploitRpcAdapter:
                 session_id = int(raw_id)
                 self.client.call("session.stop", session_id)
                 stopped.append(session_id)
-            except Exception:
-                continue
-        return stopped
+            except Exception as exc:
+                errors.append(f"Could not stop Metasploit session {raw_id}: {exc}")
+        return stopped, errors

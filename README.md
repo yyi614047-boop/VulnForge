@@ -6,7 +6,7 @@ The project uses Markdown role instructions, LangChain with the OpenAI API for m
 
 ## Product design and PoC sources
 
-- **Metasploit Framework — primary PoC source:** read-only CVE module discovery and module metadata inspection are implemented behind `MetasploitDiscovery`; controlled RPC execution remains planned.
+- **Metasploit Framework — primary PoC source:** read-only CVE module discovery and metadata inspection are implemented behind `MetasploitDiscovery`; policy-gated RPC Check/Execute is wired into the LangGraph Pipeline.
 - **GitHub / Exploit-DB / upstream repositories — secondary PoC sources:** find existing standalone scripts when no suitable Metasploit module exists.
 - **Vulhub — primary vulnerable-environment source:** provide Docker Compose environments, version/configuration context, and reproduction documentation. Some entries include native PoCs, but Vulhub is not assumed to provide one for every CVE.
 
@@ -20,7 +20,7 @@ The only primary execution architecture is the staged Pipeline:
 2. **Planner** receives the research bundle and Markdown evidence, then returns a typed domain `ExecutionPlan`.
 3. **Plan validation** binds the plan to the trusted reproduction specification, source hashes, allowed actions, dependencies, and execution budgets.
 4. **Deployer** prepares and starts the Docker environment.
-5. **Reproducer** executes the approved existing PoC through its backend adapter. Metasploit discovery/inspection exists as a separate read-only capability; Metasploit RPC exploit execution is not yet connected to this path.
+5. **Reproducer** executes the approved existing PoC through its backend adapter. when explicitly enabled, the Metasploit stage attests the target on a Docker internal network, runs module Check, executes only after an exact vulnerable result, and records results for independent verification.
 6. **Bounded Recovery** may ask the Recovery Agent for one additional retry of the exact same step after a typed transient failure. The retry budget is global to one Pipeline run.
 7. **Verifier** independently evaluates response, file, and log evidence.
 8. **Cleanup** removes lab resources and writes an auditable report.
@@ -104,9 +104,9 @@ Use `--specs` to point to a directory containing reviewed YAML reproduction spec
 - Discovery never grants execution permission. The selected target, candidate, backend, operation, and approved parameters must be bound to policy.
 - The model cannot introduce arbitrary tools, targets, probes, assertions, or shell commands; do not expose unrestricted msfconsole commands, payloads, or session operations.
 - The plan must match the trusted reproduction specification, content hashes, and fixed lifecycle before execution.
-- HTTP probes use loopback; Docker image pulls and builds may contact external registries. `network_scope` is recorded in policy but container egress isolation is still pending.
+- HTTP probes use loopback; Docker image pulls and builds may contact external registries. `network_scope` is recorded in policy but the approved target and Metasploit containers are attached only to an explicitly internal Docker network during the Metasploit stage; registry pulls occur before the lab is started.
 - Metasploit RPC credentials must remain outside model context and reports. Exploit execution, payloads, sessions, and external network access require explicit authorization.
-- A separate Verifier evaluates observed evidence; the Planner and Reproducer cannot declare success.
+- A separate Verifier evaluates observed evidence; the Planner and Reproducer cannot declare success. Metasploit execution or session-cleanup failures stop the success path.
 - Cleanup is part of the Pipeline lifecycle.
 - Recovery currently supports only retrying the exact same policy-approved transient step or aborting, with at most one Agent-approved retry across the entire Pipeline run. It cannot change tools, targets, commands, plans, or verification criteria.
 
@@ -117,3 +117,64 @@ python -m pytest
 ```
 
 Model-backed and Docker-backed integration tests require credentials and local services. A passing unit suite does not establish that every upstream Vulhub environment can be reproduced.
+
+## Live Metasploit RPC run
+
+Install the optional MessagePack dependency and start a local Metasploit RPC container. The RPC listener is published only on host loopback; the Pipeline moves the running container from Docker default bridge to the approved internal lab network after the target Compose project starts.
+
+```bash
+python -m pip install -e ".[metasploit]"
+export MSFRPC_USER=vulnforge
+export MSFRPC_PASS='replace-with-a-long-random-password'
+export MSFRPC_HOST=127.0.0.1
+export MSFRPC_PORT=55553
+export MSFRPC_CONTAINER_PORT=55553
+export MSFRPC_SSL=false
+export MSF_CONTAINER_NAME=vulnforge-msf
+
+docker run -d --name "$MSF_CONTAINER_NAME" \
+  -p 127.0.0.1:55553:55553 \
+  --entrypoint msfrpcd metasploitframework/metasploit-framework:latest \
+  -U "$MSFRPC_USER" -P "$MSFRPC_PASS" -a 0.0.0.0 -p 55553 -S -f
+
+python -m app.cli --action metasploit-rpc-version
+```
+
+The -S flag disables TLS inside this local-only container RPC listener. The host port remains bound to 127.0.0.1; do not publish it on 0.0.0.0 or expose it to the Internet. For remote deployments, configure verified TLS and a private endpoint instead.
+
+Before enabling execution, review a reproduction recipe whose Compose file declares an explicit internal: true network with a stable name. Generate a policy template, then manually add the exact candidate metadata approval and network approval:
+
+```json
+{
+  "approved_poc_candidates": {
+    "metasploit:exploit/path/to/reviewed_module": "64-character-inspected-metadata-sha256"
+  },
+  "approved_lab_networks": {
+    "target-id": "exact-compose-network-name"
+  },
+  "allow_metasploit_check": true,
+  "allow_metasploit_execute": true,
+  "allow_unknown_poc_compatibility": true,
+  "allow_metasploit_payloads": false
+}
+```
+
+Keep the compatibility override false unless a reviewer explicitly accepts unknown product/version mapping. Do not approve payloads unless the selected module genuinely requires a separately reviewed payload.
+
+Then run the reviewed recipe:
+
+```bash
+python -m app.cli TARGET_ID --specs reproductions --action run \
+  --policy-file policies/local.json --discover-metasploit \
+  --enable-metasploit-execution
+```
+
+The Pipeline removes the Metasploit container default-bridge attachment, connects it to the approved internal network, and re-inspects both containers before constructing the target attestation. It refuses containers attached to any unexpected network. After execution, it records Check/Execute outcomes and requires the existing independent verifier to pass before reporting success.
+
+The optional real-RPC integration test uses a harmless custom Metasploit fixture module and a local HTTP marker server. It does not exploit a real CVE or open a shell:
+
+```bash
+VULNFORGE_MSF_INTEGRATION=1 python -m pytest -q tests/test_metasploit_live_integration.py
+```
+
+This test pulls the Metasploit Framework image and requires a working Docker daemon and Internet access for image pulls.

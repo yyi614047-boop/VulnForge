@@ -101,3 +101,13 @@ def test_runner_rejects_candidate_bundle_tampering_before_rpc():
             plan=plan, bundle=bundle, target=target, reproduction=reproduction, policy=policy,
         )
     assert adapter.calls == []
+
+def test_pipeline_report_must_not_verify_after_inconclusive_metasploit(monkeypatch):
+    # The workflow node guard is covered by the graph-level integration fixture;
+    # this assertion protects the runner's non-success classification.
+    plan, bundle, target, reproduction, policy, adapter = fixture("unknown")
+    result = MetasploitCandidateRunner(adapter).run(
+        plan=plan, bundle=bundle, target=target, reproduction=reproduction, policy=policy,
+    )
+    assert result["status"] == "inconclusive"
+    assert result["execution"] is None

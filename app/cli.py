@@ -21,7 +21,7 @@ from app.execution.metasploit_rpc import MetasploitRpcAdapter, MetasploitRpcClie
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("identifier", nargs="?", help="Reviewed reproduction specification identifier")
-    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate", "policy-preview", "metasploit-search", "metasploit-inspect"], default="run")
+    parser.add_argument("--action", choices=["engine", "research", "plan", "run", "inspect", "target-search", "target-inspect", "request-validate", "policy-preview", "metasploit-search", "metasploit-inspect", "metasploit-rpc-version"], default="run")
     parser.add_argument("--targets", type=Path, default=Path("targets/vulhub"),
                         help="Root of the retained Vulhub target corpus")
     parser.add_argument("--query", help="Search query for target-search")
@@ -68,6 +68,13 @@ def main():
             parser.error("--action target-inspect requires --environment")
         target = VulhubTargetLoader(args.targets).load(args.environment)
         print(json.dumps(target.model_dump(mode="json"), ensure_ascii=False, indent=2))
+        return
+    if args.action == "metasploit-rpc-version":
+        try:
+            version = MetasploitRpcClient.from_env().call("core.version")
+            print(json.dumps({"rpc": "connected", "version": version}, ensure_ascii=False, indent=2))
+        except (OSError, RuntimeError, ValueError) as exc:
+            parser.exit(2, f"Metasploit RPC smoke test failed: {exc}\\n")
         return
     if args.action in {"metasploit-search", "metasploit-inspect"}:
         if not args.cve:
@@ -123,6 +130,11 @@ def main():
             "approved_target_hashes": {target.target_id: target.fingerprint()},
             "approved_reproduction_hashes": {spec.id: spec.fingerprint()},
             "approved_lab_networks": {},
+            "approved_poc_candidates": {},
+            "allow_metasploit_check": False,
+            "allow_metasploit_execute": False,
+            "allow_unknown_poc_compatibility": False,
+            "allow_metasploit_payloads": False,
             "allowed_actions": sorted(actions),
             "retryable_actions": sorted(retryable_actions),
             "allowed_services": target.environment.services,

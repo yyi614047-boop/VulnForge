@@ -132,3 +132,93 @@ def test_compose_loader_rejects_non_internal_network_definition(tmp_path):
     }), encoding="utf-8")
     with pytest.raises(ValueError, match="explicitly internal"):
         load_compose(compose)
+
+class NetworkSetupRunner:
+    def __init__(self):
+        self.calls = []
+        self.inspect_count = 0
+
+    def __call__(self, argv, **kwargs):
+        self.calls.append(argv)
+        if argv[:4] == ["docker", "network", "inspect", "lab-shared"]:
+            return Result(json.dumps([{"Name": "lab-shared", "Internal": True}]))
+        if argv[:2] == ["docker", "inspect"]:
+            self.inspect_count += 1
+            networks = {"bridge": {}} if self.inspect_count == 1 else {"lab-shared": {}}
+            return Result(json.dumps([{
+                "Id": "f" * 64,
+                "State": {"Running": True},
+                "HostConfig": {"PortBindings": {
+                    "55553/tcp": [{"HostIp": "127.0.0.1", "HostPort": "15553"}]
+                }},
+                "NetworkSettings": {"Networks": networks},
+            }]))
+        if argv[:4] in (
+            ["docker", "network", "disconnect", "bridge"],
+            ["docker", "network", "connect", "lab-shared"],
+        ):
+            return Result()
+        raise AssertionError(f"Unexpected command: {argv}")
+
+
+def test_prepare_metasploit_container_moves_bridge_only_container_to_internal_network(tmp_path):
+    runner = NetworkSetupRunner()
+    lab = make_lab(tmp_path, runner)
+    result = lab.prepare_metasploit_container(
+        "lab-shared", "msf", published_rpc_port=15553, container_rpc_port=55553,
+    )
+    assert result["changed"] is True
+    assert runner.calls[1][:4] == ["docker", "inspect", "msf"]
+    assert runner.calls[2][:4] == ["docker", "network", "disconnect", "bridge"]
+    assert runner.calls[3][:4] == ["docker", "network", "connect", "lab-shared"]
+    assert runner.calls[4][:3] == ["docker", "inspect", "msf"]
+
+
+def test_prepare_metasploit_container_rejects_rpc_published_on_non_loopback(tmp_path):
+    class UnsafeRunner(NetworkSetupRunner):
+        def __call__(self, argv, **kwargs):
+            if argv[:2] == ["docker", "inspect"]:
+                row = {
+                    "Id": "f" * 64, "State": {"Running": True},
+                    "HostConfig": {"PortBindings": {
+                        "55553/tcp": [{"HostIp": "0.0.0.0", "HostPort": "15553"}]
+                    }},
+                    "NetworkSettings": {"Networks": {"bridge": {}}},
+                }
+                self.calls.append(argv)
+                return Result(json.dumps([row]))
+            return super().__call__(argv, **kwargs)
+    lab = make_lab(tmp_path, UnsafeRunner())
+    with pytest.raises(PermissionError, match="only on the configured host loopback"):
+        lab.prepare_metasploit_container(
+            "lab-shared", "msf", published_rpc_port=15553, container_rpc_port=55553,
+        )
+
+class NetworkRestoreRunner:
+    def __init__(self):
+        self.calls = []
+        self.inspect_count = 0
+
+    def __call__(self, argv, **kwargs):
+        self.calls.append(argv)
+        if argv[:2] == ["docker", "inspect"]:
+            self.inspect_count += 1
+            networks = {"lab-shared": {}} if self.inspect_count == 1 else ({} if self.inspect_count == 2 else {"bridge": {}})
+            return Result(json.dumps([{
+                "Id": "f" * 64, "State": {"Running": True},
+                "NetworkSettings": {"Networks": networks},
+            }]))
+        if argv[:5] == ["docker", "network", "disconnect", "lab-shared", "msf"]:
+            return Result()
+        if argv[:5] == ["docker", "network", "connect", "bridge", "msf"]:
+            return Result()
+        raise AssertionError(f"Unexpected command: {argv}")
+
+
+def test_restore_metasploit_container_detaches_temporary_network_before_compose_down(tmp_path):
+    runner = NetworkRestoreRunner()
+    lab = make_lab(tmp_path, runner)
+    result = lab.restore_metasploit_container("lab-shared", "msf")
+    assert result == {"network_name": "lab-shared", "restored_to": "bridge", "changed": True}
+    assert runner.calls[1][:5] == ["docker", "network", "disconnect", "lab-shared", "msf"]
+    assert runner.calls[3][:5] == ["docker", "network", "connect", "bridge", "msf"]

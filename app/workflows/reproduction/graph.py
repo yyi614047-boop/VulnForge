@@ -36,6 +36,7 @@ class Pipeline:
         self.docker_engine, self.engine_timeout = docker_engine, engine_timeout
         self.execution_policy = execution_policy
         self.metasploit_adapter = metasploit_adapter
+        self._metasploit_network_context = None
 
     @state_boundary(reads=['identifier'], writes=['bundle', 'status', 'error'])
     def research(self, state):
@@ -142,6 +143,12 @@ class Pipeline:
                 raise PermissionError("Metasploit requires an explicitly approved internal lab network and MSF_CONTAINER_NAME")
             if self.executor.lab is None or not hasattr(self.executor.lab, "resolve_target_endpoint"):
                 raise PermissionError("The active Docker lab cannot attest the selected target endpoint")
+            self._metasploit_network_context = (network_name, metasploit_container)
+            network_setup = self.executor.lab.prepare_metasploit_container(
+                network_name, metasploit_container,
+                published_rpc_port=int(os.getenv("MSFRPC_PORT", "55553")),
+                container_rpc_port=int(os.getenv("MSFRPC_CONTAINER_PORT", "55553")),
+            )
             attestation = self.executor.lab.resolve_target_endpoint(
                 reproduction.service, reproduction.port, network_name=network_name,
                 metasploit_container=metasploit_container,
@@ -153,9 +160,14 @@ class Pipeline:
                 reproduction=reproduction, policy=self.execution_policy,
                 target_attestation=attestation,
             )
+            result["network_setup"] = network_setup
             self.executor.report["metasploit"] = result
             if result["status"] == "not_reproduced":
                 self.executor.report["status"] = "not_reproduced"
+            elif result["status"] == "inconclusive":
+                self.executor.report["status"] = "inconclusive"
+            elif result["status"] == "failed":
+                self.executor.report.update(status="execution_error", error="Metasploit execution or session cleanup failed")
             self.executor.save()
             return {"poc_execution": result, "status": self.executor.report["status"]}
         except PermissionError as exc:
@@ -180,7 +192,8 @@ class Pipeline:
     @state_boundary(reads=['deployment_ready'], writes=['status'])
     def verification(self, state):
         """执行独立验证步骤并产出成功判据。"""
-        if state.get("deployment_ready") is True and self.active:
+        if (state.get("deployment_ready") is True and self.active
+                and self.executor.report.get("status") == "pending"):
             self.executor.execute_phase("verify")
             return {"status": self.executor.report["status"]}
         return {}
@@ -189,6 +202,20 @@ class Pipeline:
     def cleanup(self, state):
         """清理实验资源并保存最终执行报告。"""
         if self.active:
+            if self._metasploit_network_context is not None:
+                network_name, container_name = self._metasploit_network_context
+                try:
+                    network_cleanup = self.executor.lab.restore_metasploit_container(
+                        network_name, container_name,
+                    )
+                    self.executor.report.setdefault("metasploit", {})["network_cleanup"] = network_cleanup
+                except Exception as exc:
+                    self.executor.report.update(
+                        status="execution_error", cleanup="failed",
+                        cleanup_error=f"Metasploit network cleanup failed: {exc}",
+                    )
+                finally:
+                    self._metasploit_network_context = None
             self.executor.finish()
             self.active = False
             return {"report": self.executor.report, "status": self.executor.report["status"]}

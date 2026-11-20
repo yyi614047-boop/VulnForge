@@ -318,3 +318,8 @@ Live Docker daemon, Metasploit RPC, exploit execution, and teardown validation r
 Run the opt-in real-Docker network integration test with `VULNFORGE_DOCKER_INTEGRATION=1 python -m pytest -q tests/test_docker_isolation_integration.py`. It verifies peer reachability on the internal lab network, blocked external egress, and the one-network-only container attachment invariant. The default unit suite skips this test unless explicitly enabled.
 
 The same opt-in Docker integration suite also starts a real Compose target and a separate lab-side container, then exercises `DockerLab.resolve_target_endpoint` against Docker Inspect results to verify the live port mapping, network ID, container IDs, private addresses, and Compose fingerprint.
+
+
+## Live Metasploit execution status
+
+The primary LangGraph Pipeline now has an opt-in Metasploit RPC stage. After the reviewed Compose target starts, the stage moves a loopback-published Metasploit RPC container from Docker's default bridge onto the exact approved internal network, verifies the target and Metasploit container attachments, and binds the module invocation to the resulting Docker endpoint attestation. It then runs module.check and permits module.execute only after the same adapter instance observed the exact vulnerable result. Execute/session cleanup failures and inconclusive checks stop the success path; the existing independent verifier remains responsible for success. Use the optional live fixture test documented in README to validate a real Framework daemon without invoking a real vulnerability.

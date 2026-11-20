@@ -150,4 +150,4 @@ The active policy must also approve the target fingerprint, loopback host, and p
 
 ### Current limitations
 
-This adapter is not yet wired into LangGraph's Executor or CLI. Its RPC and policy behavior is unit-tested with a fake client; no live Metasploit daemon/module has been exercised by CI. Automatic candidate fallback and end-to-end verifier/report integration are the next milestones.
+The adapter is wired into the LangGraph Pipeline and CLI. RPC and policy behavior have fake-client unit coverage; the opt-in live Metasploit integration test exercises a harmless custom fixture module against a real Framework RPC daemon. The standard CI job intentionally skips the large Metasploit image pull; run the opt-in test locally or in a dedicated integration runner.

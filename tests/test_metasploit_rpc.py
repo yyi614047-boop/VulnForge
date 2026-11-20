@@ -265,3 +265,39 @@ def test_rpc_rejects_private_target_without_explicit_network_approval():
     spec, _ = build_poc_execution_spec(candidate, target, target_port=8080, target_attestation=attestation)
     with pytest.raises(PermissionError, match="not explicitly approved"):
         MetasploitRpcAdapter(FakeClient([]))._validate_binding(spec, candidate, target, policy, "check")
+
+def test_rpc_errors_preserve_metasploit_error_message_for_unsupported_check():
+    import pytest
+    transport = FakeRpcTransport([
+        ("auth.login", {"result": "success", "token": "token"}),
+        ("module.check", {"error": True, "error_message": "The target module does not implement a check method"}),
+    ])
+    client = MetasploitRpcClient(transport, username="user", password="pass")
+    with pytest.raises(MetasploitRpcError, match="does not implement a check method"):
+        client.call("module.check", "exploit", "demo", {})
+
+
+def test_execute_reports_session_cleanup_failure_instead_of_claiming_success():
+    target, candidate, spec, policy = fixture()
+    client = FakeClient([
+        ("module.check", {"job_id": 1, "uuid": "check-cleanup"}),
+        ("module.results", {"status": "completed", "result": {"code": "vulnerable"}}),
+        ("session.list", {}),
+        ("module.execute", {"job_id": 2, "uuid": "exec-cleanup"}),
+        ("module.results", {"status": "completed", "result": {"message": "done"}}),
+        ("session.list", {"8": {"target_host": "127.0.0.1", "via_exploit": "exploit/linux/http/demo"}}),
+        ("session.stop", RuntimeError("session stop denied")),
+    ])
+    original_call = client.call
+    def call(method, *params):
+        if method == "session.stop":
+            client.calls.append((method, params))
+            raise RuntimeError("session stop denied")
+        return original_call(method, *params)
+    client.call = call
+    adapter = MetasploitRpcAdapter(client, poll_interval=0.1)
+    check = adapter.check(spec, candidate, target, policy, timeout=2)
+    outcome = adapter.execute(spec, candidate, target, policy, check, timeout=2)
+    assert outcome.status == "failed"
+    assert outcome.cleaned_session_ids == []
+    assert "session stop denied" in outcome.cleanup_errors[0]
