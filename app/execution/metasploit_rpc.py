@@ -77,7 +77,9 @@ class MessagePackHttpTransport:
 
 
 class MetasploitRpcClient:
-    """Authenticated RPC client; only named API methods are callable."""
+    """Authenticated RPC client with a narrow, explicit API allowlist."""
+
+    ALLOWED_METHODS = {"core.version", "module.check", "module.execute", "module.results", "job.stop", "session.list", "session.stop"}
 
     def __init__(self, transport, *, username: str, password: str):
         if not username or not password:
@@ -293,6 +295,6 @@ class MetasploitRpcAdapter:
                 session_id = int(raw_id)
                 self.client.call("session.stop", session_id)
                 stopped.append(session_id)
-            except (TypeError, ValueError, MetasploitRpcError):
+            except Exception:
                 continue
         return stopped
