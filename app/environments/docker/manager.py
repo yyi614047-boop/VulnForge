@@ -381,24 +381,31 @@ class DockerLab:
                 return {"id": row.get("Id", container_id), "ip": str(address), "row": row}
             target = inspect_container(container_ids[0], "target")
             msf = inspect_container(metasploit_container, "Metasploit")
-            port_map = target["row"].get("NetworkSettings", {}).get("Ports") or {}
-            matches = []
-            for container_binding, host_bindings in port_map.items():
-                match = re.fullmatch(r"([0-9]+)/tcp", str(container_binding))
-                if not match or not isinstance(host_bindings, list):
-                    continue
-                for binding in host_bindings:
-                    if binding.get("HostIp") == "127.0.0.1" and str(binding.get("HostPort")) == str(published_port):
-                        matches.append(int(match.group(1)))
+            # NetworkSettings.Ports can contain null entries when the image does not
+            # declare EXPOSE, even though Compose has configured a host binding.
+            # HostConfig.PortBindings is Docker Inspect API configured mapping.
+            network_ports = target["row"].get("NetworkSettings", {}).get("Ports") or {}
+            configured_ports = target["row"].get("HostConfig", {}).get("PortBindings") or {}
+            port_maps = [network_ports, configured_ports]
+            matches = set()
+            for port_map in port_maps:
+                for container_binding, host_bindings in port_map.items():
+                    match = re.fullmatch(r"([0-9]+)/tcp", str(container_binding))
+                    if not match or not isinstance(host_bindings, list):
+                        continue
+                    for binding in host_bindings:
+                        if binding.get("HostIp") == "127.0.0.1" and str(binding.get("HostPort")) == str(published_port):
+                            matches.add(int(match.group(1)))
             if len(matches) != 1:
-                raise ValueError(f"Published target port {published_port} does not resolve to exactly one TCP container port; observed bindings={port_map!r}")
+                raise ValueError(f"Published target port {published_port} does not resolve to exactly one TCP container port; observed network bindings={network_ports!r}, configured bindings={configured_ports!r}")
+            container_port = next(iter(matches))
             compose_sha256 = __import__("hashlib").sha256(
                 json.dumps(config, sort_keys=True).encode("utf-8")
             ).hexdigest()
             return {
                 "project": self.project, "service": service, "compose_sha256": compose_sha256,
                 "target_container_id": target["id"], "target_host": target["ip"], "host": target["ip"],
-                "target_port": matches[0], "port": matches[0], "published_host_port": published_port,
+                "target_port": container_port, "port": container_port, "published_host_port": published_port,
                 "network_name": network_name, "network_id": network_id, "network_internal": True,
                 "target_networks": [network_name], "metasploit_container_id": msf["id"],
                 "metasploit_host": msf["ip"], "metasploit_networks": [network_name],
