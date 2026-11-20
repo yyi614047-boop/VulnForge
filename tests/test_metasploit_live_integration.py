@@ -181,7 +181,7 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
         )
         version = None
         last_error = None
-        for _ in range(60):
+        for _ in range(180):
             try:
                 version = client.call("core.version")
                 break
@@ -191,9 +191,12 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
         if not version:
             logs = docker("logs", msf_name, timeout=15)
             state = docker("inspect", "-f", "{{.State.Status}}", msf_name, timeout=10)
+            processes = docker("exec", msf_name, "ps", "-ef", timeout=10)
             raise AssertionError(
                 f"Metasploit RPC did not become ready: {last_error}; "
-                f"container_state={state.stdout.strip()}; logs={logs.stdout[-4000:]}{logs.stderr[-1000:]}"
+                f"container_state={state.stdout.strip()}; "
+                f"processes={processes.stdout[-3000:]}; "
+                f"logs={logs.stdout[-4000:]}{logs.stderr[-1000:]}"
             )
 
         module_sha = hashlib.sha256(MODULE.encode()).hexdigest()
