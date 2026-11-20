@@ -219,4 +219,4 @@ def test_execute_stops_only_new_sessions_matching_this_target_and_module():
     check = adapter.check(spec, candidate, target, policy, timeout=2)
     result = adapter.execute(spec, candidate, target, policy, check, timeout=2)
     assert result.cleaned_session_ids == [9]
-    assert client.calls[-1] == ("session.stop", ("9" if False else 9,))
+    assert client.calls[-1] == ("session.stop", (9,))
