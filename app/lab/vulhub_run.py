@@ -9,7 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypedDict
 
 import yaml
 from pydantic import Field, model_validator
@@ -57,6 +57,15 @@ class SourcePlan(StrictModel):
     rationale: str = Field(min_length=1)
     missing_information: list[str] = Field(default_factory=list)
     operations: list[Operation] = Field(default_factory=list, max_length=30)
+
+
+class ExecutionState(TypedDict, total=False):
+    bundle: dict
+    report: dict
+    report_path: Path
+    index: int
+    pending: dict
+    status: str
 
 
 def source_model():
@@ -269,16 +278,16 @@ class VulhubRun:
                 time.sleep(1)
 
     def execute_plan(self, bundle, report, report_path):
-        """Execute the Markdown-derived plan in order; no LLM chooses runtime actions."""
-        plan = SourcePlan.model_validate(bundle["plan"])
+        """Run a compact Plan -> Act -> Observe loop with deterministic routing."""
+        from langgraph.graph import END, StateGraph
+
+        operations = SourcePlan.model_validate(bundle["plan"]).operations
         documents = {item["source"]: item["text"] for item in bundle["sources"]["files"]}
-        report["execution_mode"] = "deterministic_documented_steps"
+        report["execution_mode"] = "langgraph_plan_act_observe"
         report["observations"] = []
-        for operation in plan.operations:
-            row = {"id": operation.id, "action": "execute", "phase": operation.phase,
-                   "status": "running", "source": operation.citation, "source_quote": operation.quote}
-            report["observations"].append(row)
-            atomic_json(report_path, report)
+
+        def act(state: ExecutionState):
+            operation = operations[state["index"]]
             try:
                 if operation.citation not in documents or operation.quote not in documents[operation.citation]:
                     raise ValueError("Operation source citation no longer matches the Vulhub Markdown")
@@ -287,15 +296,39 @@ class VulhubRun:
                 if operation.kind == "http" and (operation.service, operation.container_port) not in self.ports:
                     raise ValueError("HTTP target port is absent from Compose")
                 evidence = self.execute_operation(operation)
-                row.update(status="completed", evidence=evidence)
+                pending = {"id": operation.id, "phase": operation.phase, "source": operation.citation,
+                           "source_quote": operation.quote, "status": "completed", "evidence": evidence}
             except Exception as exc:
-                row.update(status="failed", error=str(exc))
-                emit("execution.step_failed", operation=operation.id, error=str(exc))
-                atomic_json(report_path, report)
-                return "execution_failed"
-            emit("execution.step_completed", operation=operation.id, evidence=evidence)
+                pending = {"id": operation.id, "phase": operation.phase, "source": operation.citation,
+                           "source_quote": operation.quote, "status": "failed", "error": str(exc)}
+            return {"pending": pending}
+
+        def observe(state: ExecutionState):
+            pending = state["pending"]
+            report["observations"].append(pending)
             atomic_json(report_path, report)
-        return "completed"
+            emit("agent.observe", operation=pending["id"], status=pending["status"],
+                 evidence=pending.get("evidence"), error=pending.get("error"))
+            return {"index": state["index"] + 1,
+                    "status": "failed" if pending["status"] == "failed" else "running"}
+
+        def route(state: ExecutionState):
+            if state["status"] == "failed" or state["index"] >= len(operations):
+                return END
+            return "act"
+
+        graph = StateGraph(ExecutionState)
+        graph.add_node("act", act)
+        graph.add_node("observe", observe)
+        graph.set_entry_point("act")
+        graph.add_edge("act", "observe")
+        graph.add_conditional_edges("observe", route, {"act": "act", END: END})
+        initial: ExecutionState = {
+            "bundle": bundle, "report": report, "report_path": Path(report_path),
+            "index": 0, "status": "running",
+        }
+        final = graph.compile().invoke(initial, {"recursion_limit": max(10, len(operations) * 2 + 5)})
+        return "execution_failed" if final["status"] == "failed" else "completed"
 
     def check(self, identifier, bundle, observations):
         """Use Metasploit's native CVE module checks; never ask a model to judge."""
