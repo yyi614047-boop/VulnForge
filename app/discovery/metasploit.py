@@ -70,7 +70,8 @@ def parse_module_info(module: str, cve: str, output: str) -> PoCCandidate:
 
     description_lines = _section_lines(output, "Description")
     description = "\n".join(description_lines).strip()
-    references = list(dict.fromkeys(CVE_IN_OUTPUT.findall(output)))
+    reference_lines = _section_lines(output, "References")
+    references = list(dict.fromkeys(CVE_IN_OUTPUT.findall("\n".join(reference_lines))))
 
     targets = []
     for line in _section_lines(output, "Targets"):
