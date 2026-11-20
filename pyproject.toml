@@ -17,7 +17,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<9"]
-local-rag = ["sentence-transformers>=3,<6"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]
@@ -25,3 +24,6 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+
+[tool.setuptools.package-data]
+"app.agents" = ["roles/*.md"]
