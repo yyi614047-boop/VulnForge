@@ -3,6 +3,7 @@ import pytest
 from app.discovery.metasploit import parse_module_info
 from app.domain.poc import PoCCandidate, PoCOption
 from app.domain.poc_execution import (
+    LabNetworkAttestation,
     PoCExecutionSpec,
     assess_metasploit_compatibility,
     build_poc_execution_spec,
@@ -164,3 +165,46 @@ def test_execution_spec_rejects_module_path_traversal():
             target_host="127.0.0.1",
             target_port=8080,
         )
+
+def make_attestation(**overrides):
+    values = {
+        "project": "lab-demo",
+        "service": "web",
+        "compose_sha256": "c" * 64,
+        "target_container_id": "d" * 64,
+        "target_host": "172.20.0.2",
+        "target_port": 80,
+        "published_host_port": 8080,
+        "network_name": "lab-shared",
+        "network_id": "e" * 64,
+        "network_internal": True,
+        "target_networks": ["lab-shared"],
+        "metasploit_container_id": "f" * 64,
+        "metasploit_host": "172.20.0.3",
+        "metasploit_networks": ["lab-shared"],
+    }
+    values.update(overrides)
+    return LabNetworkAttestation.model_validate(values)
+
+
+def test_attested_private_endpoint_builds_execution_spec_with_container_port():
+    attestation = make_attestation()
+    spec, assessment = build_poc_execution_spec(
+        make_candidate(), make_target(), target_port=8080, target_attestation=attestation,
+    )
+    assert spec.target_host == "172.20.0.2"
+    assert spec.target_port == 80
+    assert spec.options["RHOSTS"] == "172.20.0.2"
+    assert spec.options["RPORT"] == "80"
+    assert spec.target_attestation.fingerprint() == attestation.fingerprint()
+    assert assessment.status == "unknown"
+
+
+def test_attestation_rejects_any_additional_network_attachment():
+    with pytest.raises(Exception, match="only to the attested internal network"):
+        make_attestation(target_networks=["lab-shared", "bridge"])
+
+
+def test_attestation_rejects_non_private_target_address():
+    with pytest.raises(Exception, match="private, non-loopback"):
+        make_attestation(target_host="8.8.8.8")

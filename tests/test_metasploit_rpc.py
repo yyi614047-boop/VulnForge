@@ -1,5 +1,5 @@
 from app.domain.poc import PoCCandidate, PoCOption
-from app.domain.poc_execution import build_poc_execution_spec
+from app.domain.poc_execution import LabNetworkAttestation, build_poc_execution_spec
 from app.domain.policies import ExecutionPolicy
 from app.domain.targets import EnvironmentSpec, TargetSource, TargetSpec
 from app.execution.metasploit_rpc import (
@@ -233,3 +233,35 @@ def test_check_unsupported_is_reported_as_a_candidate_result():
     outcome = MetasploitRpcAdapter(client).check(spec, candidate, target, policy)
     assert outcome.status == "failed"
     assert outcome.result_code == "unsupported"
+
+def test_rpc_accepts_private_target_only_with_matching_internal_network_attestation():
+    target, candidate, _, policy = fixture()
+    attestation = LabNetworkAttestation(
+        project="lab-demo", service="web", compose_sha256="c" * 64,
+        target_container_id="d" * 64, target_host="172.20.0.2", target_port=80,
+        published_host_port=8080, network_name="lab-shared", network_id="e" * 64,
+        network_internal=True, target_networks=["lab-shared"],
+        metasploit_container_id="f" * 64, metasploit_host="172.20.0.3",
+        metasploit_networks=["lab-shared"],
+    )
+    spec, _ = build_poc_execution_spec(
+        candidate, target, target_port=8080, target_attestation=attestation,
+    )
+    policy = policy.model_copy(update={"approved_lab_networks": {target.target_id: "lab-shared"}})
+    MetasploitRpcAdapter(FakeClient([]))._validate_binding(spec, candidate, target, policy, "check")
+
+
+def test_rpc_rejects_private_target_without_explicit_network_approval():
+    import pytest
+    target, candidate, _, policy = fixture()
+    attestation = LabNetworkAttestation(
+        project="lab-demo", service="web", compose_sha256="c" * 64,
+        target_container_id="d" * 64, target_host="172.20.0.2", target_port=80,
+        published_host_port=8080, network_name="lab-shared", network_id="e" * 64,
+        network_internal=True, target_networks=["lab-shared"],
+        metasploit_container_id="f" * 64, metasploit_host="172.20.0.3",
+        metasploit_networks=["lab-shared"],
+    )
+    spec, _ = build_poc_execution_spec(candidate, target, target_port=8080, target_attestation=attestation)
+    with pytest.raises(PermissionError, match="not explicitly approved"):
+        MetasploitRpcAdapter(FakeClient([]))._validate_binding(spec, candidate, target, policy, "check")

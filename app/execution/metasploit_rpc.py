@@ -148,14 +148,22 @@ class MetasploitRpcAdapter:
             raise PermissionError("The inspected module metadata does not reference the target CVE")
         if spec.target_id != target.target_id or spec.target_fingerprint != target.fingerprint():
             raise PermissionError("Execution spec target binding is stale or mismatched")
-        policy.authorize_target(target)
-        if spec.target_host not in policy.allowed_hosts:
-            raise PermissionError("Target host is not explicitly allowed by the active policy")
-        if spec.target_port not in policy.allowed_ports:
-            raise PermissionError("Target port is not explicitly allowed by the active policy")
-        declared_ports = {port for ports in target.environment.published_ports.values() for port in ports}
-        if spec.target_port not in declared_ports:
-            raise PermissionError("Target port is not declared by the selected lab environment")
+        if spec.target_attestation is None:
+            policy.authorize_target(target)
+            if spec.target_host not in policy.allowed_hosts:
+                raise PermissionError("Target host is not explicitly allowed by the active policy")
+            if spec.target_port not in policy.allowed_ports:
+                raise PermissionError("Target port is not explicitly allowed by the active policy")
+            declared_ports = {port for ports in target.environment.published_ports.values() for port in ports}
+            if spec.target_port not in declared_ports:
+                raise PermissionError("Target port is not declared by the selected lab environment")
+        else:
+            policy.authorize_metasploit_target_attestation(
+                target, spec.target_attestation,
+                expected_compose_sha256=spec.target_attestation.compose_sha256,
+            )
+            if spec.target_host != spec.target_attestation.target_host or spec.target_port != spec.target_attestation.target_port:
+                raise PermissionError("Metasploit target endpoint differs from its Docker attestation")
         options = {item.name: item for item in candidate.options}
         if set(spec.options) - set(options):
             raise PermissionError("Execution spec contains options not declared by the inspected module")

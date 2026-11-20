@@ -30,7 +30,7 @@ def _parser():
     parser.add_argument("--msfconsole", default="msfconsole", help="Path to the msfconsole executable")
     parser.add_argument("--msf-timeout", type=int, default=180, choices=range(1, 901), metavar="SECONDS")
     parser.add_argument("--discover-metasploit", action="store_true", help="Include read-only Metasploit candidates during research/planning")
-    parser.add_argument("--enable-metasploit-execution", action="store_true", help="Enable policy-gated Metasploit Check/Execute against the approved loopback lab target")
+    parser.add_argument("--enable-metasploit-execution", action="store_true", help="Enable policy-gated Metasploit Check/Execute through an attested internal Docker lab network")
     parser.add_argument("--environment", help="Relative target directory for target-inspect")
     parser.add_argument("--request-file", type=Path, help="JSON ReproductionRequest for request-validate")
     parser.add_argument("--policy-file", type=Path, help="Reviewed JSON ExecutionPolicy required for run")
@@ -122,6 +122,7 @@ def main():
             "policy_id": f"reviewed-{spec.id}",
             "approved_target_hashes": {target.target_id: target.fingerprint()},
             "approved_reproduction_hashes": {spec.id: spec.fingerprint()},
+            "approved_lab_networks": {},
             "allowed_actions": sorted(actions),
             "retryable_actions": sorted(retryable_actions),
             "allowed_services": target.environment.services,
