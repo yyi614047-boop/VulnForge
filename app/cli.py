@@ -145,7 +145,7 @@ def main():
                     "prepared_options": prepare_module_options(
                         candidate, metadata,
                         target_host=args.target_host,
-                        target_port=args.target_port or spec.port,
+                        target_port=args.target_port if args.target_port is not None else spec.port,
                     ).model_dump(mode="json"),
                 })
             print(json.dumps({
