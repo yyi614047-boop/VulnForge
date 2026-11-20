@@ -32,6 +32,7 @@ class ExecutionPlan(DomainModel):
     target_id: str = Field(min_length=1, max_length=200)
     policy_id: str = Field(min_length=1, max_length=128)
     rationale: str = Field(min_length=1, max_length=4000)
+    input_fingerprints: dict[str, str] = Field(min_length=3, max_length=10)
     steps: list[ExecutionStep] = Field(min_length=1, max_length=200)
 
     @model_validator(mode="after")
