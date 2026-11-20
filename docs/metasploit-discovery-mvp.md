@@ -129,3 +129,87 @@ print(prepared.model_dump(mode="json"))
 The result includes `ready`, `options`, `missing_required`, and `notes`. `ready=True` means only that required options are populated; it is not an exploitability verdict or execution authorization.
 
 This MVP requires an explicit reachable target host. It does not guess container IPs, start labs, call Module Check, execute an exploit, create sessions, or verify a vulnerability. A future integration can resolve the target endpoint from the Docker lab runtime and pass it to this pure preparation function.
+
+
+## Docker target resolution and approved check-only execution
+
+The next slice resolves the private endpoint of one already-running lab service and adds a narrowly scoped Metasploit module.check adapter. It does not execute an exploit.
+
+### 1. Attach Metasploit to the lab's dedicated attack network
+
+The Metasploit container must already be running, have its RPC management connection configured separately, and be attached to the selected lab network. The target service must also be on that network. Use a dedicated network for the lab; do not attach Metasploit to an unrelated shared application network.
+
+For example, if the Compose project network is lab-demo_default:
+
+\`\`\`bash
+docker network connect lab-demo_default metasploit
+\`\`\`
+
+The command below verifies that both containers are running and attached to the exact same network. It only resolves an address from that selected network and requires the target's reviewed published TCP port to bind to 127.0.0.1.
+
+### 2. Resolve the container endpoint
+
+\`\`\`bash
+vulnforge --action docker-target-resolve CVE-2021-44228-log4j \\
+  --workspace .labs \\
+  --project lab-demo \\
+  --metasploit-network lab-demo_default \\
+  --metasploit-container metasploit
+\`\`\`
+
+The output includes the target's private container IP and internal TCP port. This address is intended for Metasploit on the shared attack network; it is not the host's loopback-published port.
+
+### 3. Prepare module options and review the approval template
+
+\`\`\`bash
+vulnforge --action metasploit-prepare CVE-2021-44228-log4j \\
+  --target-host 172.20.0.2 \\
+  --target-port 8080 \\
+  --candidate-limit 20
+\`\`\`
+
+Select the exact candidate by its module_type and module_name. The output includes options_sha256 and an approval_template. Copy the template to a local JSON file, replace policy_id with the reviewed approval identifier, and review the module and every option. Do not commit the approval file or sensitive option values.
+
+For additional declared module options, provide a JSON object with --module-options-file to both the prepare and check commands. The options hash must match exactly.
+
+### 4. Run only the approved module check
+
+\`\`\`bash
+vulnforge --action metasploit-check CVE-2021-44228-log4j \\
+  --project lab-demo \\
+  --metasploit-network lab-demo_default \\
+  --metasploit-container metasploit \\
+  --module-type exploit \\
+  --module-name multi/http/example \\
+  --approval-file ./local-check-approval.json
+\`\`\`
+
+The check command:
+- Re-resolves the running target endpoint; it does not trust a host address copied from an earlier run.
+- Requires an exact module type/name match in the CVE search results.
+- Rebuilds the option set and checks its SHA-256 fingerprint against the approval file.
+- Requires the approval to match the target ID, private IP, internal port, candidate ID, and exact options.
+- Calls Metasploit module.check and polls module.results within the approved time budget.
+- Reports the check code and job result without exposing the option values.
+
+Example approval file shape (replace all example values after reviewing the generated template):
+
+\`\`\`json
+{
+  "policy_id": "reviewed-local-lab-check-001",
+  "candidate_id": "metasploit:exploit:multi/http/example",
+  "target_id": "CVE-2021-44228-log4j",
+  "target_host": "172.20.0.2",
+  "target_port": 8080,
+  "options_sha256": "<sha256-from-prepare-output>",
+  "max_wait_seconds": 60
+}
+\`\`\`
+
+### Scope and safety boundary
+
+- Implemented: Docker endpoint resolution for one declared service, one loopback-published TCP port, one explicitly selected private IPv4 network, and verification that the Metasploit container shares that network.
+- Implemented: module.check and bounded result polling for explicitly approved exploit and auxiliary modules.
+- Implemented: exact approval binding over candidate, target, host, port, and option fingerprint.
+- Not implemented: automatic Docker network creation or isolation policy, automatic Metasploit container deployment, LangGraph routing, exploit execution, session management, or post-exploit verification.
+- A Metasploit Vulnerable check code is check evidence, not an independent VulnForge reproduction verdict. Appears, Detected, Safe, Unknown, unsupported checks, RPC errors, and timeouts must remain distinguishable.
