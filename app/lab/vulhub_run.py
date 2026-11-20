@@ -393,11 +393,18 @@ class VulhubRun:
                 report["logs"] = self.command(["logs", "--no-color", "--tail", "100"])
             except Exception as exc:
                 report["logs_error"] = str(exc)
-            report["verification"] = self.check(identifier, bundle, report["observations"])
+            if report["execution_status"] == "completed":
+                report["verification"] = self.check(identifier, bundle, report["observations"])
+            else:
+                report["verification"] = {
+                    "status": "inconclusive",
+                    "reason": "Documented Vulhub steps did not complete; Metasploit check was skipped",
+                    "verification_method": "metasploit_native_check",
+                }
             report["status"] = report["verification"]["status"]
-            emit("check.end", result=report["verification"])
-            if report["execution_status"] != "completed" and report["status"] == "success":
+            if report["execution_status"] != "completed":
                 report["status"] = report["execution_status"]
+            emit("check.end", result=report["verification"])
         except BaseException as exc:
             report.update(status="cancelled" if isinstance(exc, (KeyboardInterrupt, SystemExit)) else "execution_error",
                           error=str(exc))
