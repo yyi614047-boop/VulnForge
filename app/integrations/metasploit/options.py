@@ -82,6 +82,9 @@ def prepare_module_options(
             raise ValueError(f"Target-bound option cannot be overridden: {name}")
         values[name] = value
 
+    if any(not isinstance(value, (str, int, float, bool, type(None))) for value in values.values()):
+        raise ValueError("Metasploit module options must be scalar values")
+
     for name, definition in definitions.items():
         if definition.get("required") and (name not in values or values[name] in (None, "")):
             missing.append(name)
