@@ -312,17 +312,25 @@ class VulhubRun:
             return {"index": state["index"] + 1,
                     "status": "failed" if pending["status"] == "failed" else "running"}
 
+        def decide(state: ExecutionState):
+            # Fixed policy: continue after a completed step; abort on any failed step.
+            decision = "continue" if state["status"] == "running" else "abort"
+            emit("agent.decide", decision=decision, next_index=state["index"])
+            return {"decision": decision}
+
         def route(state: ExecutionState):
-            if state["status"] == "failed" or state["index"] >= len(operations):
+            if state.get("decision") != "continue" or state["index"] >= len(operations):
                 return END
             return "act"
 
         graph = StateGraph(ExecutionState)
         graph.add_node("act", act)
         graph.add_node("observe", observe)
+        graph.add_node("decide", decide)
         graph.set_entry_point("act")
         graph.add_edge("act", "observe")
-        graph.add_conditional_edges("observe", route, {"act": "act", END: END})
+        graph.add_edge("observe", "decide")
+        graph.add_conditional_edges("decide", route, {"act": "act", END: END})
         initial: ExecutionState = {
             "bundle": bundle, "report": report, "report_path": Path(report_path),
             "index": 0, "status": "running",
