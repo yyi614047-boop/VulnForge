@@ -43,6 +43,13 @@ class TargetCatalog:
         if not isinstance(services, dict) or not services:
             raise ValueError("Compose file must declare at least one service")
 
+        referenced_services = {spec.service}
+        referenced_services.update(script.service for script in [*spec.initialization, *spec.scripts])
+        referenced_services.update(item.service for item in spec.file_evidence)
+        referenced_services.update(item.service for item in spec.version_probes)
+        if not referenced_services <= set(services):
+            raise ValueError("Reproduction spec references a service missing from Compose")
+
         published_ports = {}
         for service, config in services.items():
             ports = []
@@ -55,6 +62,8 @@ class TargetCatalog:
                     ports.append(int(entry["published"]))
             if ports:
                 published_ports[str(service)] = sorted(set(ports))
+        published_ports.setdefault(spec.service, [])
+        published_ports[spec.service] = sorted(set([*published_ports[spec.service], spec.port]))
 
         source_refs = []
         for index, source in enumerate(spec.sources):

@@ -11,6 +11,7 @@ from app.agents.researcher import Researcher
 from app.environments.docker.engine import EngineParams
 from app.workflows.reproduction.state import PipelineState
 from app.domain.policies import ExecutionPolicy
+from app.domain.plans import ExecutionPlan
 from app.domain.targets import TargetSpec
 from app.domain.reproduction import ReproductionSpec
 from app.targets.vulhub.catalog import TargetCatalog
@@ -73,6 +74,16 @@ class Pipeline:
             return {}
         if self.execution_policy is None or not state.get("domain_plan"):
             return {"status": "policy_denied", "error": "ExecutionPolicy validation is required before deployment"}
+        try:
+            target = TargetSpec.model_validate(state["target_spec"])
+            reproduction = ReproductionSpec.model_validate(state["reproduction_spec"])
+            domain_plan = ExecutionPlan.model_validate(state["domain_plan"])
+            expected = to_execution_plan(self.planner_plan(state), target, reproduction, self.execution_policy)
+            if domain_plan.model_dump(mode="json") != expected.model_dump(mode="json"):
+                raise PermissionError("Domain plan changed after policy validation")
+            domain_plan.validate_policy(self.execution_policy, target, reproduction)
+        except Exception as exc:
+            return {"status": "policy_denied", "error": str(exc)}
         engine = {}
         try:
             if self.docker_engine is not None:
@@ -93,6 +104,8 @@ class Pipeline:
                 self.executor.save()
             self.executor.execute_phase("deploy")
             return {"status": self.executor.report["status"]}
+        except PermissionError as exc:
+            return {"status": "policy_denied", "error": str(exc), "engine": engine}
         except Exception as exc:
             return {"status": "environment_error", "error": str(exc), "engine": engine}
 
@@ -128,7 +141,8 @@ class Pipeline:
         return {"report": {"id": state["identifier"], "status": state.get("status", "execution_error"),
                            "error": state.get("error"), "cleanup": "not_needed",
                            "engine": state.get("engine"),
-                           "research": state.get("bundle"), "plan": state.get("plan")}}
+                           "research": state.get("bundle"), "plan": state.get("plan"),
+                           "domain_plan": state.get("domain_plan")}}
 
     def graph(self):
         """构建 LangGraph 编排图并连接各实验阶段。"""
@@ -176,7 +190,9 @@ class Pipeline:
                 return report
         executor_options = dict(self.executor_options)
         executor_options.setdefault("recovery_controller", self.recovery_controller)
-        executor_options.setdefault("recovery_budget", 1 if self.recovery_controller is not None else 0)
+        policy_recovery_budget = self.execution_policy.max_recovery_actions if self.execution_policy else 0
+        executor_options.setdefault("recovery_budget", min(1, policy_recovery_budget)
+                                     if self.recovery_controller is not None else 0)
         self.executor = StepExecutor(self.knowledge, self.workspace, self.project, report_path, **executor_options)
         state = {"identifier": identifier}
         try:
