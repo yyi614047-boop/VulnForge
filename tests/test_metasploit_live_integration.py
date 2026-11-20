@@ -173,6 +173,25 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
         )
         attestation = LabNetworkAttestation.model_validate(endpoint)
 
+        local_probe = None
+        for _ in range(120):
+            local_probe = docker(
+                "exec", msf_name, "python3", "-c",
+                "import socket; s=socket.create_connection(('127.0.0.1',55553),timeout=2); s.close()",
+                timeout=5,
+            )
+            if local_probe.returncode == 0:
+                break
+            time.sleep(1)
+        if local_probe is None or local_probe.returncode:
+            logs = docker("logs", msf_name, timeout=15)
+            processes = docker("exec", msf_name, "ps", "-ef", timeout=10)
+            raise AssertionError(
+                f"Metasploit RPC never listened inside its own container; "
+                f"processes={processes.stdout[-3000:]}; "
+                f"logs={logs.stdout[-4000:]}{logs.stderr[-1000:]}"
+            )
+
         client = MetasploitRpcClient(
             MessagePackHttpTransport(
                 host="127.0.0.1", port=rpc_host_port, ssl_enabled=False, timeout=3,
@@ -181,7 +200,7 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
         )
         version = None
         last_error = None
-        for _ in range(180):
+        for _ in range(30):
             try:
                 version = client.call("core.version")
                 break
