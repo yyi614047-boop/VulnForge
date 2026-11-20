@@ -28,6 +28,7 @@ LangGraph owns the StateGraph, node scheduling, state transitions, and condition
 | Runtime / orchestration | LangGraph |
 | Schemas and validation | Pydantic |
 | Tool execution | Custom `StepExecutor` and Docker/HTTP/file tools |
+| Execution plan | Single Pydantic domain `ExecutionPlan` shared by Planner, Pipeline and Executor |
 | Recovery | Markdown-guided Recovery Agent + deterministic retry gate |
 | Reproduction input | Reviewed YAML `ReproductionSpec` files in `reproductions/` |
 | Retrieval | Not part of the application |
@@ -36,7 +37,7 @@ RAG, BM25, embedding indexes, the experimental source-driven runner, and the dup
 
 ## Transitional target inputs
 
-The runtime now reads reviewed YAML `ReproductionSpec` files through `TargetCatalog` from `reproductions/`. The old `knowledge/` directory and `KnowledgeBase` compatibility modules have been removed. `TargetSpec` remains a separate, untrusted description of upstream target material; `ExecutionPolicy` is the independent authorization contract. The CLI emits a policy template with `--action policy-preview`; a reviewed `ExecutionPolicy` JSON file is mandatory for `run`. The Pipeline converts planner output into `ExecutionPlan`, validates target and reproduction fingerprints plus allowed actions, and the Executor revalidates the same domain plan before opening the lab.
+The runtime now reads reviewed YAML `ReproductionSpec` files through `TargetCatalog` from `reproductions/`. The old `knowledge/` directory and `KnowledgeBase` compatibility modules have been removed. `TargetSpec` remains a separate, untrusted description of upstream target material; `ExecutionPolicy` is the independent authorization contract. The CLI emits a policy template with `--action policy-preview`; a reviewed `ExecutionPolicy` JSON file is mandatory for `run`. The Planner emits the canonical domain `ExecutionPlan` directly. The Pipeline and Executor use that same contract without a legacy plan adapter. Plans bind reproduction, Compose, and asset fingerprints; the Executor revalidates lifecycle order, evidence references, policy actions, and source fingerprints before opening the lab.
 
 The upstream Vulhub corpus now lives under `targets/vulhub/` as untrusted target material. `VulhubTargetLoader` converts environments into `TargetSpec` candidates; it never grants execution permission. Use `--action target-search` or `--action target-inspect` to explore candidates, and `--action request-validate` to validate a `ReproductionRequest`.
 
