@@ -11,3 +11,5 @@ dist/
 build/
 .labs/
 .cache/
+reports/*
+!reports/.gitkeep
