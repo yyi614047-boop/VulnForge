@@ -11,7 +11,7 @@ from pydantic import Field
 from app.runtime.context import agent_session, invoke_agent
 from app.agents.role_prompts import load_role_prompt
 from app.execution.artifacts import collect_assets, digest
-from app.lab.knowledge import KnowledgeBase, StrictModel
+from app.targets.vulhub.legacy_cards import KnowledgeBase, StrictModel
 from app.environments.docker.manager import load_compose
 
 

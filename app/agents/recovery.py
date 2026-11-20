@@ -6,7 +6,7 @@ from pydantic import Field
 
 from app.runtime.context import agent_session, invoke_agent
 from app.agents.role_prompts import load_role_prompt
-from app.lab.knowledge import StrictModel
+from app.targets.vulhub.legacy_cards import StrictModel
 
 
 class RecoveryDecision(StrictModel):

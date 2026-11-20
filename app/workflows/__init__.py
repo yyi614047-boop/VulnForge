@@ -1,1 +1,1 @@
-"""LangGraph workflow orchestration."""
+"""LangGraph workflow orchestration and bounded workflow services."""

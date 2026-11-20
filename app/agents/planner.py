@@ -7,7 +7,7 @@ from pydantic import Field, model_validator
 from app.runtime.context import agent_session, invoke_agent
 from app.agents.role_prompts import load_role_prompt
 
-from app.lab.knowledge import Card, StrictModel
+from app.targets.vulhub.legacy_cards import Card, StrictModel
 from app.execution.artifacts import digest
 
 Action = Literal["stage_artifacts", "pull", "build", "up", "status", "version", "initialize", "health", "script", "http", "verify_http", "read_file", "logs", "verify", "down", "keep"]

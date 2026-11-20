@@ -11,7 +11,7 @@ from pathlib import Path
 from threading import Event
 
 from app.execution.probes import request, verify
-from app.lab.knowledge import Card, KnowledgeBase
+from app.targets.vulhub.legacy_cards import Card, KnowledgeBase
 from app.agents.planner import DeploymentPlan, Step, validate_deployment_plan
 from app.execution.artifacts import digest
 from app.environments.docker.manager import DockerLab, DockerLabParams, load_compose
