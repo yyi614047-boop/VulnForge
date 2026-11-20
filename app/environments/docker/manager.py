@@ -301,6 +301,80 @@ class DockerLab:
         evidence = json.loads(result.stdout)
         return {**evidence, "service": service, "path": path}
 
+
+    def resolve_target_endpoint(self, service: str, published_port: int, *, timeout: int = 15) -> dict:
+        """Resolve one running Compose service to its private container IP/port.
+
+        The published port must be explicitly bound to loopback in the reviewed
+        Compose file. The returned private endpoint is intended for a separately
+        network-attached Metasploit container, never for arbitrary host targets.
+        """
+        config = self.configuration()
+        if service not in config["services"]:
+            raise ValueError("Target service is not declared in the reviewed Compose file")
+        declared = config["services"][service].get("ports", [])
+        if not any(
+            isinstance(item, str)
+            and re.fullmatch(rf"127\\.0\\.0\\.1:{published_port}:[0-9]+/tcp", item)
+            for item in declared
+        ):
+            raise ValueError("Target port must be explicitly published on loopback as TCP")
+
+        listed = self._invoke([*self._prefix(), "ps", "-q", service], timeout)
+        if listed.returncode:
+            raise ToolExecutionError(f"Cannot list target container: {listed.stderr}")
+        container_ids = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+        if len(container_ids) != 1:
+            raise ValueError("Expected exactly one container for the selected target service")
+        inspected = self._invoke(["docker", "inspect", container_ids[0]], timeout)
+        if inspected.returncode:
+            raise ToolExecutionError(f"Cannot inspect target container: {inspected.stderr}")
+        try:
+            rows = json.loads(inspected.stdout)
+            if not isinstance(rows, list) or len(rows) != 1:
+                raise ValueError("Unexpected Docker inspect response")
+            row = rows[0]
+            if row.get("State", {}).get("Running") is not True:
+                raise ValueError("Selected target container is not running")
+            port_map = row.get("NetworkSettings", {}).get("Ports") or {}
+            matches = []
+            for container_binding, host_bindings in port_map.items():
+                match = re.fullmatch(r"([0-9]+)/tcp", str(container_binding))
+                if not match or not isinstance(host_bindings, list):
+                    continue
+                for binding in host_bindings:
+                    if (binding.get("HostIp") == "127.0.0.1"
+                            and str(binding.get("HostPort")) == str(published_port)):
+                        matches.append(int(match.group(1)))
+            if len(matches) != 1:
+                raise ValueError("Published target port does not resolve to exactly one TCP container port")
+            networks = row.get("NetworkSettings", {}).get("Networks") or {}
+            endpoints = []
+            for network_name, network in networks.items():
+                address = network.get("IPAddress")
+                if not address:
+                    continue
+                ip = ipaddress.ip_address(address)
+                if ip.is_private and not ip.is_loopback and not ip.is_link_local:
+                    endpoints.append((str(network_name), str(ip)))
+            if not endpoints:
+                raise ValueError("Target container has no private, non-loopback IPv4 network address")
+            # Stable ordering makes the selected endpoint deterministic.
+            endpoints.sort()
+            network_name, address = endpoints[0]
+            return {
+                "project": self.project,
+                "service": service,
+                "container_id": container_ids[0],
+                "host": address,
+                "port": matches[0],
+                "published_host_port": published_port,
+                "network": network_name,
+                "networks": [name for name, _ in endpoints],
+            }
+        except (KeyError, TypeError, ValueError, ipaddress.AddressValueError) as exc:
+            raise ValueError(f"Cannot safely resolve target endpoint: {exc}") from exc
+
     def probe_version(self, service, command, *, timeout=30):
         if service not in self.configuration()["services"]:
             raise ValueError("Version service is not in the prepared environment")
