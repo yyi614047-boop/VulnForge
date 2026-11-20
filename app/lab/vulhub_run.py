@@ -9,7 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Literal
 
 import yaml
 from pydantic import Field, model_validator
@@ -104,13 +104,11 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 class VulhubRun:
     def __init__(self, knowledge, workspace, project, llm, *, timeout=60, retries=1,
                  keep=False, auto_port=True, docker_engine=None, engine_timeout=120,
-                 runner=subprocess.run, opener=None, max_steps=30, metasploit=None):
+                 runner=subprocess.run, opener=None, metasploit=None):
         if not re.fullmatch(r"lab-[a-z0-9][a-z0-9_-]{0,48}", project):
             raise ValueError("Project must start with lab- and contain lowercase letters/digits/_/-")
         if not 1 <= timeout <= 300 or not 0 <= retries <= 3:
             raise ValueError("Invalid execution limits")
-        if not 1 <= max_steps <= 200:
-            raise ValueError("max_steps must be between 1 and 200")
         self.knowledge = Path(knowledge).resolve()
         self.workspace, self.project = Path(workspace).resolve(), project
         self.model, self.timeout, self.retries = llm, timeout, retries
@@ -121,7 +119,6 @@ class VulhubRun:
         self.root = self.workspace / project / "source"
         self.compose = self.root / "docker-compose.yml"
         self.ports = {}
-        self.max_steps = max_steps
         self.metasploit = metasploit or MetasploitRunner()
 
     @agent_session
@@ -256,13 +253,6 @@ class VulhubRun:
         return traced_call("tool", "http", {"url": url, "method": operation.method,
                                             "headers": operation.headers, "body": operation.body}, execute)
 
-    def read_source(self, source_path):
-        path = (self.root / source_path).resolve()
-        if not path.is_relative_to(self.root) or not path.is_file() or path.stat().st_size > 200_000:
-            raise ValueError("Read a text file inside the environment snapshot, up to 200000 bytes")
-        return traced_call("tool", "read_source", {"path": source_path},
-                           lambda: {"path": source_path, "text": path.read_text(encoding="utf-8")})
-
     def execute_operation(self, operation):
         for attempt in range(self.retries + 1 if operation.phase == "health" else 1):
             try:
@@ -342,30 +332,28 @@ class VulhubRun:
                 "reason": reason_map.get(result["status"], "No definitive Metasploit result")}
 
     @isolated_run
-    def run(self, identifier, report_path, *, engine="langgraph"):
+    def run(self, identifier, report_path):
         report_path = Path(report_path)
         if report_path.exists():
             raise FileExistsError("Report exists; choose a new report path")
         trace_path = report_path.with_suffix(".trace.jsonl")
         with TraceRecorder(trace_path, self.project):
-            emit("run.start", identifier=identifier, engine=engine,
+            emit("run.start", identifier=identifier, execution_mode="deterministic",
                  knowledge=str(self.knowledge), report=str(report_path.resolve()),
                  model=getattr(self.model, "model_name", None),
-                 limits={"max_steps": self.max_steps, "timeout": self.timeout, "retries": self.retries})
+                 limits={"timeout": self.timeout, "retries": self.retries})
             try:
-                result = self._run(identifier, report_path, engine=engine, trace_path=trace_path)
+                result = self._run(identifier, report_path, trace_path=trace_path)
             except BaseException as exc:
                 emit("run.error", error={"type": type(exc).__name__, "message": str(exc)})
                 raise
             emit("run.end", status=result["status"], cleanup=result["cleanup"])
             return result
 
-    def _run(self, identifier, report_path, *, engine, trace_path):
+    def _run(self, identifier, report_path, *, trace_path):
         report_path = Path(report_path)
-        if engine not in {"langgraph", "sequential"}:
-            raise ValueError("Unknown workflow engine")
         report = {"id": identifier, "project": self.project, "status": "planning", "cleanup": "not_needed",
-                  "observations": [], "workflow": "vulhub_sources", "engine_type": engine,
+                  "observations": [], "workflow": "vulhub_sources", "execution_mode": "deterministic",
                   "trace": str(trace_path.resolve())}
         started = False
         report_path.parent.mkdir(parents=True, exist_ok=True)
