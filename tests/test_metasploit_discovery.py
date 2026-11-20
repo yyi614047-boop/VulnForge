@@ -109,3 +109,13 @@ def test_candidate_metadata_hash_changes_with_inspected_output():
     one = parse_module_info("exploit/linux/http/example", "CVE-2020-1234", "Name: A")
     two = parse_module_info("exploit/linux/http/example", "CVE-2020-1234", "Name: B")
     assert one.metadata_sha256 != two.metadata_sha256
+
+
+def test_cve_mentioned_in_description_is_not_a_module_reference():
+    candidate = parse_module_info(
+        "exploit/linux/http/demo",
+        "CVE-2020-1234",
+        "Name: Demo\nDescription:\n  This advisory discusses CVE-2020-1234.\nReferences:\n  URL: https://example.test/",
+    )
+    assert candidate.discovery_query_cve == "CVE-2020-1234"
+    assert candidate.cve_ids == []
