@@ -88,10 +88,10 @@ On PowerShell use `$env:OPENAI_API_KEY="..."` and `$env:PLANNER_MODEL="gpt-4o"`.
 Recommended happy path (after reviewing the target recipe and policy):
 
 ```bash
-vulnforge CVE-2021-25646 --policy policies/local.json --msf-check
+vulnforge CVE-2021-25646
 ```
 
-The default action is `run`, the default specs directory is `reproductions/`, and `--msf-check` implies Metasploit discovery. This mode runs the reviewed reproduction, performs Metasploit Check only, and collects independent evidence. It does **not** execute a Metasploit exploit. The reviewed policy, target and network approvals are still mandatory. Advanced and legacy flags remain supported.
+The default action is `run`, the default specs directory is `reproductions/`, the default reviewed policy path is `policies/local.json`, and check-only Metasploit discovery/verification is enabled for the happy path. This mode runs the reviewed reproduction, performs Metasploit Check only, and collects independent evidence. It does **not** execute a Metasploit exploit. The reviewed policy, target and network approvals are still mandatory. Advanced and legacy flags remain supported. Use `--no-msf-check` to run the legacy reproduction-only path. A missing or unapproved policy fails closed; the CLI never generates or approves one automatically.\n\nBatch mode runs each reviewed identifier sequentially, isolates failures, and returns a nonzero exit code if any item fails:\n\n```bash\nprintf "CVE-2021-25646\\nCVE-2024-12345\\n" > targets.txt\nvulnforge --batch targets.txt\n```\n\nThe same reviewed policy must explicitly approve every target; no target is automatically authorized.
 
 ```bash
 python -m app.cli --action target-search --query CVE-2021-25646
