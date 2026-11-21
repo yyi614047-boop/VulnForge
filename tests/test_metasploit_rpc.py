@@ -369,12 +369,18 @@ def test_docker_exec_transport_rejects_ruby_injection_in_endpoint():
         DockerExecMessagePackTransport("msf", endpoint="/api/'; system('id'); #")
 
 
-def test_timed_out_job_is_stopped_and_absence_is_confirmed():
+def test_timed_out_job_is_stopped_and_absence_is_confirmed(monkeypatch):
     import pytest
     from app.execution.metasploit_rpc import MetasploitJobCleanupError
 
+    clock = [0.0]
+    def monotonic():
+        clock[0] += 0.2
+        return clock[0]
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.monotonic", monotonic)
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.sleep", lambda _: None)
     client = FakeClient(
-        [("module.results", {"status": "running"}) for _ in range(12)]
+        [("module.results", {"status": "running"}) for _ in range(4)]
         + [("job.stop", True), ("job.list", {})]
     )
     adapter = MetasploitRpcAdapter(client, poll_interval=0.1, job_cleanup_timeout=0.2)
@@ -383,14 +389,19 @@ def test_timed_out_job_is_stopped_and_absence_is_confirmed():
     assert [name for name, _ in client.calls] == ["module.results", "job.stop", "job.list"]
 
 
-def test_timed_out_job_fails_closed_when_stop_cannot_be_confirmed():
+def test_timed_out_job_fails_closed_when_stop_cannot_be_confirmed(monkeypatch):
     import pytest
     from app.execution.metasploit_rpc import MetasploitJobCleanupError
 
+    clock = [0.0]
+    def monotonic():
+        clock[0] += 0.2
+        return clock[0]
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.monotonic", monotonic)
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.sleep", lambda _: None)
     client = FakeClient(
-        [("module.results", {"status": "running"}) for _ in range(12)]
-        + [("job.stop", True)]
-        + [("job.list", {"7": "exploit/demo"}) for _ in range(5)]
+        [("module.results", {"status": "running"}) for _ in range(4)]
+        + [("job.stop", True), ("job.list", {"7": "exploit/demo"})]
     )
     adapter = MetasploitRpcAdapter(client, poll_interval=0.1, job_cleanup_timeout=0.2)
     with pytest.raises(MetasploitJobCleanupError, match="remained active"):
