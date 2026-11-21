@@ -221,3 +221,30 @@ def test_restore_metasploit_container_detaches_temporary_network_before_compose_
     assert result == {"network_name": "lab-shared", "restored_to": "bridge", "changed": True}
     assert runner.calls[1][:5] == ["docker", "network", "disconnect", "lab-shared", "msf"]
     assert runner.calls[3][:5] == ["docker", "network", "connect", "bridge", "msf"]
+
+
+class NetworkRestoreAfterPartialSetupRunner:
+    def __init__(self):
+        self.calls = []
+        self.inspect_count = 0
+
+    def __call__(self, argv, **kwargs):
+        self.calls.append(argv)
+        if argv[:2] == ["docker", "inspect"]:
+            self.inspect_count += 1
+            networks = {} if self.inspect_count == 1 else {"bridge": {}}
+            return Result(json.dumps([{
+                "Id": "f" * 64, "State": {"Running": True},
+                "NetworkSettings": {"Networks": networks},
+            }]))
+        if argv[:5] == ["docker", "network", "connect", "bridge", "msf"]:
+            return Result()
+        raise AssertionError(f"Unexpected command: {argv}")
+
+
+def test_restore_metasploit_container_rolls_back_partial_network_setup(tmp_path):
+    runner = NetworkRestoreAfterPartialSetupRunner()
+    lab = make_lab(tmp_path, runner)
+    result = lab.restore_metasploit_container("lab-shared", "msf")
+    assert result == {"network_name": "lab-shared", "restored_to": "bridge", "changed": True}
+    assert runner.calls[1][:5] == ["docker", "network", "connect", "bridge", "msf"]
