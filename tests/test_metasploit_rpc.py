@@ -215,6 +215,7 @@ def test_execute_stops_only_new_sessions_matching_this_target_and_module():
             "10": {"target_host": "192.0.2.8", "via_exploit": "exploit/linux/http/demo"},
         }),
         ("session.stop", True),
+        ("session.list", {}),
     ])
     adapter = MetasploitRpcAdapter(client, poll_interval=0.1)
     check = adapter.check(spec, candidate, target, policy, timeout=2)
@@ -403,3 +404,32 @@ def test_timed_out_job_fails_closed_when_stop_cannot_be_confirmed(monkeypatch):
     adapter = MetasploitRpcAdapter(client, poll_interval=0.1, job_cleanup_timeout=0.2)
     with pytest.raises(MetasploitJobCleanupError, match="remained active"):
         adapter._wait_for_result(7, "stuck-job", timeout=1)
+
+
+def test_execute_preserves_timeout_and_reports_session_cleanup_failure(monkeypatch):
+    import pytest
+    from app.execution.metasploit_rpc import MetasploitExecutionError
+
+    target, candidate, spec, policy = fixture()
+    clock = [0.0]
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.sleep", lambda _: clock.__setitem__(0, clock[0] + 2.0))
+    client = FakeClient([
+        ("module.check", {"job_id": 1, "uuid": "check-before-timeout"}),
+        ("module.results", {"status": "completed", "result": {"code": "vulnerable"}}),
+        ("session.list", {}),
+        ("module.execute", {"job_id": 2, "uuid": "exec-timeout"}),
+        ("module.results", {"status": "running"}),
+        ("job.stop", True),
+        ("job.list", {}),
+        ("session.list", {
+            "8": {"target_host": "127.0.0.1", "via_exploit": "exploit/linux/http/demo"}
+        }),
+        ("session.stop", RuntimeError("session stop denied")),
+    ])
+    adapter = MetasploitRpcAdapter(client, poll_interval=0.1, job_cleanup_timeout=0.2)
+    check = adapter.check(spec, candidate, target, policy, timeout=2)
+    with pytest.raises(MetasploitExecutionError, match="execution failed") as error:
+        adapter.execute(spec, candidate, target, policy, check, timeout=1)
+    assert "session stop denied" in str(error.value)
+    assert error.value.cleanup_errors
