@@ -348,13 +348,31 @@ class MetasploitRpcAdapter:
                 )
             time.sleep(min(self.poll_interval, max(0, deadline - time.monotonic())))
 
-    def _wait_for_result(self, job_id: int, job_uuid: str, timeout: int) -> dict:
+    def _wait_for_result(self, job_id: int, job_uuid: str, timeout: int, *,
+                         allow_no_session: bool = False) -> dict:
         if not 1 <= timeout <= 300:
             raise ValueError("Metasploit job timeout must be between 1 and 300 seconds")
         emit("metasploit.job.wait.start", job_id=job_id, job_uuid=job_uuid, timeout_seconds=timeout)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            result = self.client.call("module.results", job_uuid)
+            try:
+                result = self.client.call("module.results", job_uuid)
+            except MetasploitRpcError as exc:
+                # Some valid exploit modules intentionally produce a non-session
+                # effect (e.g. a file write). Metasploit reports this as an RPC
+                # error even after the job has finished. Treat it only as a
+                # completed invocation after job.list confirms termination;
+                # independent target verification remains mandatory.
+                if allow_no_session and "no session created" in str(exc).lower():
+                    active_jobs = self.client.call("job.list")
+                    if isinstance(active_jobs, dict) and str(job_id) not in {str(key) for key in active_jobs}:
+                        emit("metasploit.job.completed", job_id=job_id, job_uuid=job_uuid,
+                             status="completed_without_session")
+                        return {"status": "completed", "result": {
+                            "session_created": False,
+                            "message": "No session created; independent verification required",
+                        }}
+                raise
             if not isinstance(result, dict):
                 emit("metasploit.job.failed", job_id=job_id, job_uuid=job_uuid, reason="malformed_result")
                 raise MetasploitRpcError("Metasploit returned a malformed module result")
@@ -441,7 +459,7 @@ class MetasploitRpcAdapter:
         completed = None
         execution_error = None
         try:
-            completed = self._wait_for_result(job_id, job_uuid, timeout)
+            completed = self._wait_for_result(job_id, job_uuid, timeout, allow_no_session=True)
         except Exception as exc:
             execution_error = exc
         finally:
