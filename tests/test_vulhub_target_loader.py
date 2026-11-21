@@ -26,6 +26,16 @@ def test_loader_rejects_environment_path_escape(tmp_path):
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "docker-compose.yml").write_text("services: {web: {image: nginx}}", encoding="utf-8")
-    (root / "escape").symlink_to(outside, target_is_directory=True)
-    with pytest.raises(ValueError):
-        VulhubTargetLoader(root).load("escape")
+    loader = VulhubTargetLoader(root)
+    try:
+        (root / "escape").symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        # Creating directory symlinks may require elevated privileges on Windows.
+        # Keep the traversal assertion meaningful even when the OS blocks symlink creation.
+        if getattr(exc, "winerror", None) != 1314:
+            raise
+        with pytest.raises(ValueError):
+            loader.load("../outside")
+    else:
+        with pytest.raises(ValueError):
+            loader.load("escape")
