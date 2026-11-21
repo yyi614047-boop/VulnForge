@@ -61,7 +61,7 @@ def test_real_apache_cve_2021_41773_disclosure_and_trace(tmp_path):
         allow_image_build=True, max_timeout_seconds=120, max_recovery_actions=0,
     )
     report_path = tmp_path / "reports" / "apache.json"
-    project = "vf-cve-" + uuid4().hex[:10]
+    project = "lab-cve-" + uuid4().hex[:10]
     pipeline = Pipeline(specs, tmp_path / "labs", project, llm=None, timeout=120,
                         execution_policy=policy)
     report = pipeline.run(spec.id, report_path)
