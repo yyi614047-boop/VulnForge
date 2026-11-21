@@ -67,7 +67,7 @@ def test_batch_parses_file_path():
 def test_batch_rejects_missing_reviewed_policy(monkeypatch, tmp_path):
     import pytest
     batch = tmp_path / "targets.txt"
-    batch.write_text("CVE-2021-25646\\n")
+    batch.write_text("CVE-2021-25646\n")
     monkeypatch.setattr(sys, "argv", ["vulnforge", "--batch", str(batch),
                                     "--policy", str(tmp_path / "missing.json")])
     with pytest.raises(SystemExit) as exc:
@@ -79,7 +79,7 @@ def test_batch_runs_sequentially_and_reports_partial_failure(monkeypatch, tmp_pa
     import subprocess
     import pytest
     batch = tmp_path / "targets.txt"
-    batch.write_text("# approved\\nCVE-2021-25646\\nCVE-2024-12345\\n")
+    batch.write_text("# approved\nCVE-2021-25646\nCVE-2024-12345\n")
     policy = tmp_path / "reviewed.json"
     policy.write_text("{}")
     calls = []
