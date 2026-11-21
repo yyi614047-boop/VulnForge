@@ -46,8 +46,10 @@ class MessagePackHttpTransport:
             raise ValueError("Metasploit RPC server must be bound to loopback in V1")
         if not 1 <= port <= 65535 or not 1 <= timeout <= 120:
             raise ValueError("Invalid Metasploit RPC port or timeout")
-        if not endpoint.startswith("/") or ".." in endpoint.split("/"):
-            raise ValueError("RPC endpoint must be an absolute, traversal-free path")
+        if (not isinstance(endpoint, str)
+                or not re.fullmatch(r"/[A-Za-z0-9._~/-]*", endpoint)
+                or ".." in endpoint.split("/")):
+            raise ValueError("RPC endpoint must be an absolute, traversal-free path with safe characters")
         self.host, self.port = host, port
         self.ssl_enabled, self.endpoint = ssl_enabled, endpoint
         self.timeout, self.opener = timeout, opener
