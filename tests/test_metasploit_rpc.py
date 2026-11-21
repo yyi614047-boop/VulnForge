@@ -336,3 +336,27 @@ def test_docker_exec_transport_rejects_invalid_container_names():
     from app.execution.metasploit_rpc import DockerExecMessagePackTransport
     with pytest.raises(ValueError, match="container name"):
         DockerExecMessagePackTransport("bad name")
+
+
+
+def test_docker_exec_transport_normalizes_binary_messagepack_hash_keys():
+    import base64
+    import subprocess
+    import pytest
+    msgpack = pytest.importorskip("msgpack")
+    from app.execution.metasploit_rpc import DockerExecMessagePackTransport
+
+    class Runner:
+        def __call__(self, argv, **kwargs):
+            body = msgpack.packb(
+                {b"result": b"success", b"token": b"TEMP-token",
+                 b"nested": {b"version": b"6.4.0"}},
+                use_bin_type=True,
+            )
+            return subprocess.CompletedProcess(argv, 0, base64.b64encode(body), b"")
+
+    transport = DockerExecMessagePackTransport("msf", runner=Runner())
+    assert transport.call("auth.login", "user", "password") == {
+        "result": "success", "token": "TEMP-token",
+        "nested": {"version": "6.4.0"},
+    }

@@ -132,6 +132,24 @@ STDOUT.write(Base64.strict_encode64(response.body))
         try:
             encoded = result.stdout.decode("ascii") if isinstance(result.stdout, bytes) else str(result.stdout)
             response = msgpack.unpackb(base64.b64decode(encoded), raw=False, strict_map_key=False)
+
+            def normalize_messagepack(value):
+                # Metasploit's Ruby MessagePack encoder emits Hash keys as binary strings.
+                # Normalize those keys (and any binary string values) for Python callers.
+                if isinstance(value, bytes):
+                    return value.decode("utf-8", errors="replace")
+                if isinstance(value, dict):
+                    return {
+                        normalize_messagepack(key): normalize_messagepack(item)
+                        for key, item in value.items()
+                    }
+                if isinstance(value, list):
+                    return [normalize_messagepack(item) for item in value]
+                if isinstance(value, tuple):
+                    return tuple(normalize_messagepack(item) for item in value)
+                return value
+
+            response = normalize_messagepack(response)
         except Exception as exc:
             raise MetasploitRpcError(f"Invalid MessagePack response from Metasploit Docker Exec: {exc}") from exc
         if isinstance(response, dict) and response.get("error"):
