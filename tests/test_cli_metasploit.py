@@ -56,7 +56,7 @@ def test_legacy_metasploit_flags_remain_compatible():
 def test_minimal_happy_path_defaults_to_reviewed_policy_and_run():
     args = cli._parser().parse_args(["CVE-2021-25646"])
     assert args.action == "run"
-    assert str(args.policy_file) == "policies/local.json"
+    assert args.policy_file == Path("policies/local.json")
     assert not args.no_msf_check
 
 
