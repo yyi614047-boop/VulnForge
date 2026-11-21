@@ -34,6 +34,15 @@ class MetasploitRpcError(RuntimeError):
 class MetasploitJobCleanupError(MetasploitRpcError):
     """Raised when a timed-out Metasploit job cannot be confirmed stopped."""
 
+class MetasploitExecutionError(MetasploitRpcError):
+    """Execution failed and one or more cleanup actions also failed."""
+
+    def __init__(self, message: str, *, cleanup_errors: list[str]):
+        super().__init__(message)
+        self.cleanup_errors = cleanup_errors
+
+
+
 
 class MessagePackHttpTransport:
     """Small HTTP MessagePack transport for the Metasploit Framework RPC API."""
@@ -406,21 +415,39 @@ class MetasploitRpcAdapter:
                 or check_outcome.module_metadata_sha256 != candidate.metadata_sha256):
             raise PermissionError("Exploit execution requires a completed vulnerable Check from the same adapter instance")
         before_sessions = self.client.call("session.list") or {}
+        if not isinstance(before_sessions, dict):
+            raise MetasploitRpcError("Metasploit returned a malformed pre-execution session list")
         response = self.client.call("module.execute", "exploit", self._module_name(spec), spec.options)
         job_id, job_uuid = self._ticket(response)
         stopped = []
         cleanup_errors = []
+        completed = None
+        execution_error = None
         try:
             completed = self._wait_for_result(job_id, job_uuid, timeout)
+        except Exception as exc:
+            execution_error = exc
         finally:
             # Always attempt to stop only sessions created by this module for
             # this exact target during this invocation, including timeout paths.
             try:
                 after_sessions = self.client.call("session.list") or {}
+                if not isinstance(after_sessions, dict):
+                    raise MetasploitRpcError("Metasploit returned a malformed post-execution session list")
                 stopped, cleanup_errors = self._stop_new_target_sessions(before_sessions, after_sessions, spec)
             except Exception as exc:
                 cleanup_errors.append(f"Could not inspect sessions for cleanup: {exc}")
-        result = completed.get("result") or {}
+
+        if execution_error is not None:
+            if cleanup_errors:
+                details = "; ".join(cleanup_errors)
+                raise MetasploitExecutionError(
+                    f"Metasploit execution failed ({execution_error}); session cleanup also failed ({details})",
+                    cleanup_errors=cleanup_errors,
+                ) from execution_error
+            raise execution_error
+
+        result = (completed or {}).get("result") or {}
         return MetasploitExecutionOutcome(
             candidate_id=candidate.candidate_id,
             target_id=target.target_id,
@@ -456,7 +483,19 @@ class MetasploitRpcAdapter:
             try:
                 session_id = int(raw_id)
                 self.client.call("session.stop", session_id)
-                stopped.append(session_id)
+                deadline = time.monotonic() + self.job_cleanup_timeout
+                while True:
+                    active_sessions = self.client.call("session.list")
+                    if not isinstance(active_sessions, dict):
+                        raise MetasploitRpcError("Metasploit returned a malformed session list during cleanup")
+                    if str(session_id) not in {str(key) for key in active_sessions}:
+                        stopped.append(session_id)
+                        break
+                    if time.monotonic() >= deadline:
+                        raise MetasploitJobCleanupError(
+                            f"Metasploit session {session_id} remained active after stop request"
+                        )
+                    time.sleep(min(self.poll_interval, max(0, deadline - time.monotonic())))
             except Exception as exc:
-                errors.append(f"Could not stop Metasploit session {raw_id}: {exc}")
+                errors.append(f"Could not confirm Metasploit session {raw_id} stopped: {exc}")
         return stopped, errors
