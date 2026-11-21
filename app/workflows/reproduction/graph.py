@@ -155,14 +155,21 @@ class Pipeline:
             if self.executor.lab is None or not hasattr(self.executor.lab, "resolve_target_endpoint"):
                 raise PermissionError("The active Docker lab cannot attest the selected target endpoint")
             self._metasploit_network_context = (network_name, metasploit_container)
+            emit("docker.metasploit_network.prepare.start", network_name=network_name,
+                 container=metasploit_container, target_id=target.target_id)
             network_setup = self.executor.lab.prepare_metasploit_container(
                 network_name, metasploit_container,
                 container_rpc_port=int(os.getenv("MSFRPC_CONTAINER_PORT", "55553")),
             )
+            emit("docker.metasploit_network.prepare.end", network_name=network_name,
+                 container=metasploit_container, changed=bool(network_setup.get("changed")))
             attestation = self.executor.lab.resolve_target_endpoint(
                 reproduction.service, reproduction.port, network_name=network_name,
                 metasploit_container=metasploit_container,
             )
+            emit("docker.metasploit_network.attested", network_name=network_name,
+                 target_id=target.target_id, target_host=attestation.get("target_host"),
+                 target_port=attestation.get("target_port"))
             if attestation.get("project") != self.project:
                 raise PermissionError("Docker target attestation belongs to a different lab project")
             runner = MetasploitCandidateRunner(self.metasploit_adapter)
@@ -216,12 +223,19 @@ class Pipeline:
         if self.active:
             if self._metasploit_network_context is not None:
                 network_name, container_name = self._metasploit_network_context
+                emit("docker.metasploit_network.restore.start", network_name=network_name,
+                     container=container_name)
                 try:
                     network_cleanup = self.executor.lab.restore_metasploit_container(
                         network_name, container_name,
                     )
                     self.executor.report.setdefault("metasploit", {})["network_cleanup"] = network_cleanup
+                    emit("docker.metasploit_network.restore.end", network_name=network_name,
+                         container=container_name, restored=network_cleanup.get("restored_to"),
+                         changed=bool(network_cleanup.get("changed")))
                 except Exception as exc:
+                    emit("docker.metasploit_network.restore.error", network_name=network_name,
+                         container=container_name, error_type=type(exc).__name__)
                     self.executor.report.update(
                         status="execution_error", cleanup="failed",
                         cleanup_error=f"Metasploit network cleanup failed: {exc}",
