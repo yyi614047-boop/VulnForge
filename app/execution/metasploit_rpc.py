@@ -25,6 +25,7 @@ from app.domain.poc_execution import (
 )
 from app.domain.policies import ExecutionPolicy
 from app.domain.targets import TargetSpec
+from app.runtime.tracing import emit, traced_call
 
 
 class MetasploitRpcError(RuntimeError):
@@ -217,7 +218,10 @@ class MetasploitRpcClient:
         if method == "auth.login":
             raise ValueError("Authentication is managed internally")
         if self.token is None:
-            auth = self.transport.call("auth.login", self.username, self.password)
+            auth = traced_call(
+                "metasploit.rpc", "auth.login", {"username": self.username},
+                lambda: self.transport.call("auth.login", self.username, self.password),
+            )
             if not isinstance(auth, dict) or auth.get("result") != "success" or not auth.get("token"):
                 # Include only server diagnostics and response keys; never echo credentials or tokens.
                 detail = auth.get("error_message") or auth.get("error_class") if isinstance(auth, dict) else type(auth).__name__
@@ -227,7 +231,10 @@ class MetasploitRpcClient:
                     f"response_keys={keys}"
                 )
             self.token = str(auth["token"])
-        response = self.transport.call(method, self.token, *params)
+        response = traced_call(
+            "metasploit.rpc", method, {"parameter_count": len(params)},
+            lambda: self.transport.call(method, self.token, *params),
+        )
         if isinstance(response, dict) and response.get("error"):
             raise MetasploitRpcError(str(response.get("error_message") or response.get("error_class") or response["error"]))
         return response
@@ -344,18 +351,24 @@ class MetasploitRpcAdapter:
     def _wait_for_result(self, job_id: int, job_uuid: str, timeout: int) -> dict:
         if not 1 <= timeout <= 300:
             raise ValueError("Metasploit job timeout must be between 1 and 300 seconds")
+        emit("metasploit.job.wait.start", job_id=job_id, job_uuid=job_uuid, timeout_seconds=timeout)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             result = self.client.call("module.results", job_uuid)
             if not isinstance(result, dict):
+                emit("metasploit.job.failed", job_id=job_id, job_uuid=job_uuid, reason="malformed_result")
                 raise MetasploitRpcError("Metasploit returned a malformed module result")
             status = str(result.get("status", "")).lower()
             if status == "completed":
+                emit("metasploit.job.completed", job_id=job_id, job_uuid=job_uuid)
                 return result
             if status in {"failed", "errored", "error"}:
+                emit("metasploit.job.failed", job_id=job_id, job_uuid=job_uuid, status=status)
                 raise MetasploitRpcError(f"Metasploit module job {status}: {result}")
             time.sleep(min(self.poll_interval, max(0, deadline - time.monotonic())))
+        emit("metasploit.job.timeout", job_id=job_id, job_uuid=job_uuid, timeout_seconds=timeout)
         self._stop_job_and_confirm(job_id, job_uuid)
+        emit("metasploit.job.stopped", job_id=job_id, job_uuid=job_uuid, reason="timeout")
         raise TimeoutError(f"Metasploit module job {job_uuid} exceeded {timeout} seconds; stop confirmed")
 
     def check(self, spec: PoCExecutionSpec, candidate: PoCCandidate,
@@ -380,6 +393,8 @@ class MetasploitRpcAdapter:
                 )
             raise
         job_id, job_uuid = self._ticket(response)
+        emit("metasploit.job.created", job_id=job_id, job_uuid=job_uuid, operation="check",
+             candidate_id=candidate.candidate_id, target_id=target.target_id)
         completed = self._wait_for_result(job_id, job_uuid, timeout)
         result = completed.get("result") or {}
         code = str(result.get("code", "unknown")).lower() if isinstance(result, dict) else "unknown"
@@ -419,6 +434,8 @@ class MetasploitRpcAdapter:
             raise MetasploitRpcError("Metasploit returned a malformed pre-execution session list")
         response = self.client.call("module.execute", "exploit", self._module_name(spec), spec.options)
         job_id, job_uuid = self._ticket(response)
+        emit("metasploit.job.created", job_id=job_id, job_uuid=job_uuid, operation="execute",
+             candidate_id=candidate.candidate_id, target_id=target.target_id)
         stopped = []
         cleanup_errors = []
         completed = None
@@ -482,6 +499,9 @@ class MetasploitRpcAdapter:
                 continue
             try:
                 session_id = int(raw_id)
+                emit("metasploit.session.created", session_id=session_id, target_host=host,
+                     via_exploit=via, target_id=spec.target_id, candidate_id=spec.candidate_id)
+                emit("metasploit.session.stop.requested", session_id=session_id)
                 self.client.call("session.stop", session_id)
                 deadline = time.monotonic() + self.job_cleanup_timeout
                 while True:
@@ -490,6 +510,7 @@ class MetasploitRpcAdapter:
                         raise MetasploitRpcError("Metasploit returned a malformed session list during cleanup")
                     if str(session_id) not in {str(key) for key in active_sessions}:
                         stopped.append(session_id)
+                        emit("metasploit.session.closed", session_id=session_id, confirmed=True)
                         break
                     if time.monotonic() >= deadline:
                         raise MetasploitJobCleanupError(
@@ -497,5 +518,6 @@ class MetasploitRpcAdapter:
                         )
                     time.sleep(min(self.poll_interval, max(0, deadline - time.monotonic())))
             except Exception as exc:
+                emit("metasploit.session.cleanup_error", session_id=str(raw_id), error_type=type(exc).__name__)
                 errors.append(f"Could not confirm Metasploit session {raw_id} stopped: {exc}")
         return stopped, errors
