@@ -33,6 +33,8 @@ class FakeClient:
         self.calls.append((method, params))
         expected_method, response = self.responses.pop(0)
         assert method == expected_method
+        if isinstance(response, BaseException):
+            raise response
         return response
 
 
