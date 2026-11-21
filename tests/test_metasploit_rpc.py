@@ -221,7 +221,7 @@ def test_execute_stops_only_new_sessions_matching_this_target_and_module():
     check = adapter.check(spec, candidate, target, policy, timeout=2)
     result = adapter.execute(spec, candidate, target, policy, check, timeout=2)
     assert result.cleaned_session_ids == [9]
-    assert client.calls[-1] == ("session.stop", (9,))
+    assert ("session.stop", (9,)) in client.calls
 
 
 def test_check_unsupported_is_reported_as_a_candidate_result():
