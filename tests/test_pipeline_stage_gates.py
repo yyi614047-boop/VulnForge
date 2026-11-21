@@ -46,3 +46,15 @@ def test_independent_http_verification_collects_evidence_after_inconclusive_meta
     assert result == {"status": "inconclusive"}
     assert pipeline.executor.phases == ["verify"]
     assert pipeline.executor.report["status"] == "inconclusive"
+
+
+
+def test_graph_runs_reproduction_before_metasploit_and_independent_verifier(tmp_path: Path):
+    pipeline = Pipeline(
+        tmp_path, tmp_path / "workspace", "stage-order-test",
+        metasploit_check_only=True,
+    )
+    edges = {(edge.source, edge.target) for edge in pipeline.graph().get_graph().edges}
+    assert ("deployer", "reproducer") in edges
+    assert ("reproducer", "metasploit") in edges
+    assert ("metasploit", "verifier") in edges
