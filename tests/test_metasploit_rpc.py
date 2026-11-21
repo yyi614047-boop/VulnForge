@@ -427,6 +427,13 @@ def test_execute_preserves_timeout_and_reports_session_cleanup_failure(monkeypat
         }),
         ("session.stop", RuntimeError("session stop denied")),
     ])
+    original_call = client.call
+    def call(method, *params):
+        if method == "session.stop":
+            client.calls.append((method, params))
+            raise RuntimeError("session stop denied")
+        return original_call(method, *params)
+    client.call = call
     adapter = MetasploitRpcAdapter(client, poll_interval=0.1, job_cleanup_timeout=0.2)
     check = adapter.check(spec, candidate, target, policy, timeout=2)
     with pytest.raises(MetasploitExecutionError, match="execution failed") as error:
