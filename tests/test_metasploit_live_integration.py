@@ -37,7 +37,8 @@ pytestmark = pytest.mark.skipif(
 
 def docker(*args, timeout=30):
     return subprocess.run(
-        ["docker", *args], capture_output=True, text=True, timeout=timeout, check=False,
+        ["docker", *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=timeout, check=False,
     )
 
 
