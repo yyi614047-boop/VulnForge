@@ -275,8 +275,18 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
         assert "metasploit.job.completed" in trace_events
         assert "vf-test-" not in trace_text
 
-        verified = urlopen(f"http://127.0.0.1:{target_host_port}/verify", timeout=5).read().decode()
-        assert "VULNFORGE_EXECUTED" in verified, verified
+        target_container = docker(
+            "compose", "-p", project, "-f", str(compose_path), "ps", "-q", "web",
+        )
+        assert target_container.returncode == 0 and target_container.stdout.strip(), target_container.stderr
+        verified = docker(
+            "exec", target_container.stdout.strip(), "python", "-c",
+            "from urllib.request import urlopen; print(urlopen('http://127.0.0.1:8080/verify', timeout=5).read().decode())",
+            timeout=10,
+        )
+        assert verified.returncode == 0 and "VULNFORGE_EXECUTED" in verified.stdout, (
+            verified.stdout, verified.stderr
+        )
 
     finally:
         if msf_started:
