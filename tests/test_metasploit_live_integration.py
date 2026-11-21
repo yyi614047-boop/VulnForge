@@ -63,15 +63,15 @@ class MetasploitModule < Msf::Auxiliary
 
   def check
     response = send_request_cgi('method' => 'GET', 'uri' => '/health')
-    return CheckCode::Unknown('No HTTP response') unless response
-    return CheckCode::Vulnerable('Fixture marker is present') if
+    return Msf::Exploit::CheckCode::Unknown('No HTTP response') unless response
+    return Msf::Exploit::CheckCode::Vulnerable('Fixture marker is present') if
       response.code == 200 && response.body.include?('VULNFORGE_FIXTURE_VULNERABLE')
-    CheckCode::Safe('Fixture marker is absent')
+    Msf::Exploit::CheckCode::Safe('Fixture marker is absent')
   end
 
   def run
     response = send_request_cgi('method' => 'POST', 'uri' => '/trigger')
-    fail_with(Failure::UnexpectedReply, 'Fixture trigger failed') unless response && response.code == 200
+    raise 'Fixture trigger failed' unless response && response.code == 200
     print_good('Harmless local fixture trigger completed')
   end
 end
