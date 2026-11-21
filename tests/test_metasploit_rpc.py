@@ -360,3 +360,10 @@ def test_docker_exec_transport_normalizes_binary_messagepack_hash_keys():
         "result": "success", "token": "TEMP-token",
         "nested": {"version": "6.4.0"},
     }
+
+
+def test_docker_exec_transport_rejects_ruby_injection_in_endpoint():
+    import pytest
+    from app.execution.metasploit_rpc import DockerExecMessagePackTransport
+    with pytest.raises(ValueError, match="safe characters"):
+        DockerExecMessagePackTransport("msf", endpoint="/api/'; system('id'); #")
