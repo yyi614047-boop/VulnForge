@@ -1,4 +1,4 @@
-"""Opt-in live Metasploit RPC test using a harmless local-only auxiliary fixture.
+"""Opt-in live Metasploit RPC test using a harmless local-only exploit fixture.
 
 Run with VULNFORGE_MSF_INTEGRATION=1. The fixture only checks a local HTTP marker
 and POSTs to a local test HTTP server; it does not exploit a CVE or open a shell.
@@ -125,7 +125,7 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
                 pytest.skip(f"Cannot obtain integration image {image}: {pulled.stderr[-500:]}")
 
     module_root = tmp_path / "msf-modules"
-    module_path = module_root / "auxiliary" / "scanner" / "http" / "vulnforge_fixture.rb"
+    module_path = module_root / "exploits" / "multi" / "http" / "vulnforge_fixture.rb"
     module_path.parent.mkdir(parents=True)
     module_path.write_text(MODULE, encoding="utf-8")
 
