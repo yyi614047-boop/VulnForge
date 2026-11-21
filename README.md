@@ -169,7 +169,7 @@ python -m app.cli TARGET_ID --specs reproductions --action run \
 
 The Pipeline removes the Metasploit container default-bridge attachment, connects it to the approved internal network, restarts the RPC daemon, and re-inspects both containers before constructing the target attestation. It refuses containers attached to any unexpected network. After execution, it records Check/Execute outcomes and requires the existing independent verifier to pass before reporting success.
 
-The optional real-RPC integration test uses a harmless custom Metasploit fixture module and a local HTTP marker server. It does not exploit a real CVE or open a shell:
+The optional real-RPC integration test uses a harmless custom Metasploit auxiliary scanner and a local HTTP marker server. It exercises the real Check and Execute RPC methods without invoking an exploit module, exploiting a CVE, or opening a shell:
 
 ```bash
 VULNFORGE_MSF_INTEGRATION=1 python -m pytest -q tests/test_metasploit_live_integration.py
