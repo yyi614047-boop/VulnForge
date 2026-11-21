@@ -198,3 +198,7 @@ This test pulls the Metasploit Framework image and requires a working Docker dae
 ## Run trace
 
 Every pipeline run writes a JSON Lines trace next to its report, named `reports/<project>.trace.jsonl`. The JSON report includes `trace_path`. The trace contains ordered stage transitions and model/tool call timing and status, with input/output payloads omitted by default to avoid recording prompts, credentials, or sensitive exploit data. This is an execution audit trail, **not** a deterministic replay engine.
+
+## Real CVE acceptance test
+
+CI includes an opt-in real Docker test for Apache HTTP Server CVE-2021-41773 using the retained Vulhub Dockerfile. It tests read-only local file disclosure (no RCE), independent HTTP evidence, cleanup, and trace persistence. The test constructs an ephemeral, hash-bound policy for its dedicated loopback lab only; this is not a general-purpose approval or a shipped `policies/local.json`. Run locally with `VULNFORGE_REAL_CVE_E2E=1 python -m pytest -q tests/test_real_cve_e2e.py`. The normal CLI happy path still requires a separately reviewed reproduction specification and policy.
