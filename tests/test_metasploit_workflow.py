@@ -111,3 +111,20 @@ def test_pipeline_report_must_not_verify_after_inconclusive_metasploit(monkeypat
     )
     assert result["status"] == "inconclusive"
     assert result["execution"] is None
+
+
+
+def test_runner_check_only_verification_preserves_safe_and_unknown_results():
+    plan, bundle, target, reproduction, policy, safe_adapter = fixture("safe")
+    safe = MetasploitCandidateRunner(safe_adapter).verify(
+        plan=plan, bundle=bundle, target=target, reproduction=reproduction, policy=policy,
+    )
+    assert safe["status"] == "not_reproduced"
+    assert [call[0] for call in safe_adapter.calls] == ["check"]
+
+    plan, bundle, target, reproduction, policy, unknown_adapter = fixture("unknown")
+    unknown = MetasploitCandidateRunner(unknown_adapter).verify(
+        plan=plan, bundle=bundle, target=target, reproduction=reproduction, policy=policy,
+    )
+    assert unknown["status"] == "inconclusive"
+    assert [call[0] for call in unknown_adapter.calls] == ["check"]

@@ -159,6 +159,16 @@ Before enabling execution, review a reproduction recipe whose Compose file decla
 
 Keep the compatibility override false unless a reviewer explicitly accepts unknown product/version mapping. Do not approve payloads unless the selected module genuinely requires a separately reviewed payload.
 
+For the recommended independent-verification mode, run the reproduction first and let Metasploit perform a Check only. This mode never invokes `module.execute`:
+
+```bash
+python -m app.cli TARGET_ID --specs reproductions --action run \
+  --policy-file policies/local.json --discover-metasploit \
+  --enable-metasploit-verification
+```
+
+A missing candidate, unsupported Check, or inconclusive RPC result is recorded as `inconclusive`; it cannot be silently upgraded to success. Independent HTTP verification still runs to preserve evidence, but does not override an inconclusive Metasploit result.
+
 Then run the reviewed recipe:
 
 ```bash

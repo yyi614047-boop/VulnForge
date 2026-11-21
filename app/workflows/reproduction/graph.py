@@ -22,7 +22,7 @@ from app.workflows.reproduction.metasploit import MetasploitCandidateRunner
 class Pipeline:
     def __init__(self, knowledge: Path, workspace: Path, project: str, *, llm=None, retries=1, timeout=60, keep=False, executor_options=None,
                  docker_engine=None, engine_timeout=120, execution_policy: ExecutionPolicy | None = None,
-                 poc_discovery=None, metasploit_adapter=None):
+                 poc_discovery=None, metasploit_adapter=None, metasploit_check_only=False):
         """初始化组件及其运行所需的配置、依赖和状态。"""
         self._run_lock = Lock()
         self.knowledge, self.workspace, self.project = knowledge, workspace, project
@@ -36,6 +36,7 @@ class Pipeline:
         self.docker_engine, self.engine_timeout = docker_engine, engine_timeout
         self.execution_policy = execution_policy
         self.metasploit_adapter = metasploit_adapter
+        self.metasploit_check_only = metasploit_check_only
         self._metasploit_network_context = None
 
     @state_boundary(reads=['identifier'], writes=['bundle', 'status', 'error'])
@@ -128,12 +129,21 @@ class Pipeline:
             return {}
         plan = ExecutionPlan.model_validate(state["plan"])
         if not plan.selected_poc_candidate_id:
+            result = {"status": "inconclusive", "reason": "Planner did not select an independently checkable Metasploit candidate"}
+            if self.metasploit_check_only:
+                self.executor.report["status"] = "inconclusive"
+                self.executor.report["metasploit"] = result
+                self.executor.save()
+                return {"poc_execution": result, "status": "inconclusive"}
             return {"poc_execution": {"status": "skipped", "reason": "Planner did not select a Metasploit candidate"}}
         if self.metasploit_adapter is None:
-            result = {"status": "skipped", "reason": "Metasploit execution was not explicitly enabled"}
+            result = {"status": "inconclusive" if self.metasploit_check_only else "skipped",
+                      "reason": "Metasploit adapter is not enabled"}
             self.executor.report["metasploit"] = result
+            if result["status"] == "inconclusive":
+                self.executor.report["status"] = "inconclusive"
             self.executor.save()
-            return {"poc_execution": result}
+            return {"poc_execution": result, "status": self.executor.report["status"]}
         try:
             target = TargetSpec.model_validate(state["target_spec"])
             reproduction = ReproductionSpec.model_validate(state["reproduction_spec"])
@@ -154,7 +164,9 @@ class Pipeline:
             )
             if attestation.get("project") != self.project:
                 raise PermissionError("Docker target attestation belongs to a different lab project")
-            result = MetasploitCandidateRunner(self.metasploit_adapter).run(
+            runner = MetasploitCandidateRunner(self.metasploit_adapter)
+            run_method = runner.verify if self.metasploit_check_only else runner.run
+            result = run_method(
                 plan=plan, bundle=state["bundle"], target=target,
                 reproduction=reproduction, policy=self.execution_policy,
                 target_attestation=attestation,
@@ -190,9 +202,9 @@ class Pipeline:
 
     @state_boundary(reads=['deployment_ready'], writes=['status'])
     def verification(self, state):
-        """执行独立验证步骤并产出成功判据。"""
+        """执行独立验证步骤并产出成功判据，即使 Metasploit 结论不确定也保留证据。"""
         if (state.get("deployment_ready") is True and self.active
-                and self.executor.report.get("status") == "pending"):
+                and self.executor.report.get("status") in {"pending", "inconclusive", "not_reproduced"}):
             self.executor.execute_phase("verify")
             return {"status": self.executor.report["status"]}
         return {}
@@ -234,9 +246,9 @@ class Pipeline:
         graph.set_entry_point("researcher")
         graph.add_conditional_edges("researcher", lambda s: "planner" if s["status"] == "researched" else "cleanup")
         graph.add_conditional_edges("planner", lambda s: "deployer" if s["status"] == "planned" else "cleanup")
-        graph.add_edge("deployer", "metasploit")
-        graph.add_edge("metasploit", "reproducer")
-        graph.add_edge("reproducer", "verifier")
+        graph.add_edge("deployer", "reproducer")
+        graph.add_edge("reproducer", "metasploit")
+        graph.add_edge("metasploit", "verifier")
         graph.add_edge("verifier", "cleanup")
         graph.add_edge("cleanup", END)
         return graph.compile()

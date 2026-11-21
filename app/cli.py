@@ -31,6 +31,8 @@ def _parser():
     parser.add_argument("--msf-timeout", type=int, default=180, choices=range(1, 901), metavar="SECONDS")
     parser.add_argument("--discover-metasploit", action="store_true", help="Include read-only Metasploit candidates during research/planning")
     parser.add_argument("--enable-metasploit-execution", action="store_true", help="Enable policy-gated Metasploit Check/Execute through an attested internal Docker lab network")
+    parser.add_argument("--enable-metasploit-verification", action="store_true",
+                        help="Run a policy-gated Metasploit Check after reproduction without executing an exploit")
     parser.add_argument("--environment", help="Relative target directory for target-inspect")
     parser.add_argument("--request-file", type=Path, help="JSON ReproductionRequest for request-validate")
     parser.add_argument("--policy-file", type=Path, help="Reviewed JSON ExecutionPolicy required for run")
@@ -168,6 +170,12 @@ def main():
         parser.error("--enable-metasploit-execution is only valid with --action run")
     if args.enable_metasploit_execution and not args.discover_metasploit:
         parser.error("--enable-metasploit-execution requires --discover-metasploit")
+    if args.enable_metasploit_verification and args.enable_metasploit_execution:
+        parser.error("Choose check-only verification or exploit execution, not both")
+    if (args.enable_metasploit_verification or args.enable_metasploit_execution) and not args.discover_metasploit:
+        parser.error("Metasploit verification/execution requires --discover-metasploit")
+    if args.enable_metasploit_verification and args.action != "run":
+        parser.error("--enable-metasploit-verification is only valid with --action run")
     if args.action in {"plan", "run"} and not args.policy_file:
         parser.error(f"--action {args.action} requires --policy-file; generate a reviewed template with --action policy-preview")
     try:
@@ -191,7 +199,8 @@ def main():
             return
         project = args.project or f"lab-{uuid4().hex[:12]}"
         report_path = args.report or Path("reports") / f"{project}.json"
-        metasploit_adapter = MetasploitRpcAdapter(MetasploitRpcClient.from_env()) if args.enable_metasploit_execution else None
+        metasploit_enabled = args.enable_metasploit_execution or args.enable_metasploit_verification
+        metasploit_adapter = MetasploitRpcAdapter(MetasploitRpcClient.from_env()) if metasploit_enabled else None
         pipeline = Pipeline(
             args.specs, args.workspace, project, llm=model,
             retries=args.retries, timeout=args.timeout, keep=args.keep,
@@ -199,6 +208,7 @@ def main():
             execution_policy=policy,
             poc_discovery=MetasploitDiscovery(executable=args.msfconsole, timeout=args.msf_timeout) if args.discover_metasploit else None,
             metasploit_adapter=metasploit_adapter,
+            metasploit_check_only=args.enable_metasploit_verification,
         )
         report = pipeline.run(args.identifier, report_path)
         print(json.dumps({
