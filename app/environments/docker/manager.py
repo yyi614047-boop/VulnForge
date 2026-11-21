@@ -319,6 +319,112 @@ class DockerLab:
         evidence = json.loads(result.stdout)
         return {**evidence, "service": service, "path": path}
 
+
+    def prepare_metasploit_container(self, network_name: str, container: str, *,
+                                     container_rpc_port: int = 55553,
+                                     timeout: int = 15) -> dict:
+        """Move a loopback-only RPC container from default bridge to the approved internal network.
+
+        RPC is accessed via Docker Exec, so the Metasploit port must not be published on
+        any host interface. Only a container attached solely to Docker default bridge
+        may be moved automatically.
+        """
+        if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", network_name):
+            raise ValueError("Invalid approved Docker network name")
+        if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", container):
+            raise ValueError("Invalid Metasploit container name")
+        if not 1 <= container_rpc_port <= 65535:
+            raise ValueError("Invalid Metasploit container RPC port")
+        network_result = self._invoke(["docker", "network", "inspect", network_name], timeout)
+        if network_result.returncode:
+            raise ToolExecutionError(f"Cannot inspect approved lab network: {network_result.stderr}")
+        networks = json.loads(network_result.stdout)
+        if len(networks) != 1 or networks[0].get("Name") != network_name or networks[0].get("Internal") is not True:
+            raise PermissionError("Metasploit can only join the approved Docker internal network")
+        inspected = self._invoke(["docker", "inspect", container], timeout)
+        if inspected.returncode:
+            raise ToolExecutionError(f"Cannot inspect Metasploit container: {inspected.stderr}")
+        rows = json.loads(inspected.stdout)
+        if not isinstance(rows, list) or len(rows) != 1 or rows[0].get("State", {}).get("Running") is not True:
+            raise ValueError("Metasploit container must exist and already be running")
+        row = rows[0]
+        bindings = (row.get("HostConfig", {}).get("PortBindings") or {}).get(f"{container_rpc_port}/tcp") or []
+        if bindings:
+            raise PermissionError("Metasploit RPC must not be published to host interfaces; use Docker Exec transport")
+        attached = row.get("NetworkSettings", {}).get("Networks") or {}
+        if set(attached) == {network_name}:
+            return {"container_id": row.get("Id"), "network_name": network_name, "changed": False}
+        if set(attached) != {"bridge"}:
+            raise PermissionError("Metasploit container must be on Docker default bridge only before lab attachment")
+        disconnected = self._invoke(["docker", "network", "disconnect", "bridge", container], timeout)
+        if disconnected.returncode:
+            raise ToolExecutionError(f"Cannot remove Metasploit default bridge attachment: {disconnected.stderr}")
+        connected = self._invoke(["docker", "network", "connect", network_name, container], timeout)
+        if connected.returncode:
+            raise ToolExecutionError(f"Cannot attach Metasploit to approved internal network: {connected.stderr}")
+        # Refresh Docker's published-port forwarding after changing the container's
+        # sole network attachment. The RPC listener restarts on the internal interface.
+        restarted = self._invoke(["docker", "restart", container], timeout)
+        if restarted.returncode:
+            raise ToolExecutionError(f"Cannot restart Metasploit after internal-network attachment: {restarted.stderr}")
+        verified = self._invoke(["docker", "inspect", container], timeout)
+        if verified.returncode:
+            raise ToolExecutionError(f"Cannot verify Metasploit network attachment: {verified.stderr}")
+        final_rows = json.loads(verified.stdout)
+        final_networks = (final_rows[0].get("NetworkSettings", {}).get("Networks") or {}) if len(final_rows) == 1 else {}
+        if set(final_networks) != {network_name}:
+            raise PermissionError("Metasploit container retained an unexpected network attachment")
+        return {"container_id": final_rows[0].get("Id"), "network_name": network_name, "changed": True}
+
+
+    def restore_metasploit_container(self, network_name: str, container: str, *, timeout: int = 15) -> dict:
+        """Detach Metasploit from the temporary lab network before Compose teardown."""
+        inspected = self._invoke(["docker", "inspect", container], timeout)
+        if inspected.returncode:
+            raise ToolExecutionError(f"Cannot inspect Metasploit container during cleanup: {inspected.stderr}")
+        rows = json.loads(inspected.stdout)
+        if not isinstance(rows, list) or len(rows) != 1:
+            raise ValueError("Unexpected Metasploit container inspect response during cleanup")
+        attached = rows[0].get("NetworkSettings", {}).get("Networks") or {}
+        if network_name not in attached:
+            if set(attached) == {"bridge"}:
+                return {"network_name": network_name, "restored_to": "bridge", "changed": False}
+            if attached:
+                raise PermissionError("Metasploit container is not on the expected lab network during cleanup")
+            # Roll back a partial prepare operation that detached the default
+            # bridge but failed before attaching the approved lab network.
+            connected = self._invoke(["docker", "network", "connect", "bridge", container], timeout)
+            if connected.returncode:
+                raise ToolExecutionError(f"Cannot restore Metasploit default bridge after partial setup: {connected.stderr}")
+            verified = self._invoke(["docker", "inspect", container], timeout)
+            if verified.returncode:
+                raise ToolExecutionError(f"Cannot verify restored Metasploit bridge after partial setup: {verified.stderr}")
+            final_rows = json.loads(verified.stdout)
+            final_networks = (final_rows[0].get("NetworkSettings", {}).get("Networks") or {}) if len(final_rows) == 1 else {}
+            if set(final_networks) != {"bridge"}:
+                raise PermissionError("Metasploit partial-setup rollback left unexpected Docker network attachments")
+            return {"network_name": network_name, "restored_to": "bridge", "changed": True}
+        disconnected = self._invoke(["docker", "network", "disconnect", network_name, container], timeout)
+        if disconnected.returncode:
+            raise ToolExecutionError(f"Cannot detach Metasploit from temporary lab network: {disconnected.stderr}")
+        verified = self._invoke(["docker", "inspect", container], timeout)
+        if verified.returncode:
+            raise ToolExecutionError(f"Cannot verify Metasploit detach: {verified.stderr}")
+        final_rows = json.loads(verified.stdout)
+        final_networks = (final_rows[0].get("NetworkSettings", {}).get("Networks") or {}) if len(final_rows) == 1 else {}
+        if not final_networks:
+            connected = self._invoke(["docker", "network", "connect", "bridge", container], timeout)
+            if connected.returncode:
+                raise ToolExecutionError(f"Cannot restore Metasploit default bridge attachment: {connected.stderr}")
+            verified = self._invoke(["docker", "inspect", container], timeout)
+            if verified.returncode:
+                raise ToolExecutionError(f"Cannot verify restored Metasploit bridge attachment: {verified.stderr}")
+            final_rows = json.loads(verified.stdout)
+            final_networks = (final_rows[0].get("NetworkSettings", {}).get("Networks") or {}) if len(final_rows) == 1 else {}
+        if set(final_networks) != {"bridge"}:
+            raise PermissionError("Metasploit cleanup left unexpected Docker network attachments")
+        return {"network_name": network_name, "restored_to": "bridge", "changed": True}
+
     def resolve_target_endpoint(self, service: str, published_port: int, *, network_name: str,
                                 metasploit_container: str, timeout: int = 15) -> dict:
         """Attest that target and Metasploit share one explicitly internal Docker network.
@@ -404,8 +510,8 @@ class DockerLab:
             ).hexdigest()
             return {
                 "project": self.project, "service": service, "compose_sha256": compose_sha256,
-                "target_container_id": target["id"], "target_host": target["ip"], "host": target["ip"],
-                "target_port": container_port, "port": container_port, "published_host_port": published_port,
+                "target_container_id": target["id"], "target_host": target["ip"],
+                "target_port": container_port, "published_host_port": published_port,
                 "network_name": network_name, "network_id": network_id, "network_internal": True,
                 "target_networks": [network_name], "metasploit_container_id": msf["id"],
                 "metasploit_host": msf["ip"], "metasploit_networks": [network_name],

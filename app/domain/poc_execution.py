@@ -247,3 +247,4 @@ class MetasploitExecutionOutcome(DomainModel):
     status: Literal["completed", "failed"]
     result: dict = Field(default_factory=dict, max_length=100)
     cleaned_session_ids: list[int] = Field(default_factory=list, max_length=100)
+    cleanup_errors: list[str] = Field(default_factory=list, max_length=100)

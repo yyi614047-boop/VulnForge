@@ -4,6 +4,7 @@ from threading import Lock
 import os
 
 from app.runtime.context import isolated_run, state_boundary
+from app.runtime.tracing import TraceRecorder, emit
 
 from app.agents.planner import StructuredPlanner
 from app.agents.recovery import RecoveryController
@@ -22,7 +23,7 @@ from app.workflows.reproduction.metasploit import MetasploitCandidateRunner
 class Pipeline:
     def __init__(self, knowledge: Path, workspace: Path, project: str, *, llm=None, retries=1, timeout=60, keep=False, executor_options=None,
                  docker_engine=None, engine_timeout=120, execution_policy: ExecutionPolicy | None = None,
-                 poc_discovery=None, metasploit_adapter=None):
+                 poc_discovery=None, metasploit_adapter=None, metasploit_check_only=False):
         """初始化组件及其运行所需的配置、依赖和状态。"""
         self._run_lock = Lock()
         self.knowledge, self.workspace, self.project = knowledge, workspace, project
@@ -36,6 +37,8 @@ class Pipeline:
         self.docker_engine, self.engine_timeout = docker_engine, engine_timeout
         self.execution_policy = execution_policy
         self.metasploit_adapter = metasploit_adapter
+        self.metasploit_check_only = metasploit_check_only
+        self._metasploit_network_context = None
 
     @state_boundary(reads=['identifier'], writes=['bundle', 'status', 'error'])
     def research(self, state):
@@ -127,12 +130,21 @@ class Pipeline:
             return {}
         plan = ExecutionPlan.model_validate(state["plan"])
         if not plan.selected_poc_candidate_id:
+            result = {"status": "inconclusive", "reason": "Planner did not select an independently checkable Metasploit candidate"}
+            if self.metasploit_check_only:
+                self.executor.report["status"] = "inconclusive"
+                self.executor.report["metasploit"] = result
+                self.executor.save()
+                return {"poc_execution": result, "status": "inconclusive"}
             return {"poc_execution": {"status": "skipped", "reason": "Planner did not select a Metasploit candidate"}}
         if self.metasploit_adapter is None:
-            result = {"status": "skipped", "reason": "Metasploit execution was not explicitly enabled"}
+            result = {"status": "inconclusive" if self.metasploit_check_only else "skipped",
+                      "reason": "Metasploit adapter is not enabled"}
             self.executor.report["metasploit"] = result
+            if result["status"] == "inconclusive":
+                self.executor.report["status"] = "inconclusive"
             self.executor.save()
-            return {"poc_execution": result}
+            return {"poc_execution": result, "status": self.executor.report["status"]}
         try:
             target = TargetSpec.model_validate(state["target_spec"])
             reproduction = ReproductionSpec.model_validate(state["reproduction_spec"])
@@ -142,20 +154,39 @@ class Pipeline:
                 raise PermissionError("Metasploit requires an explicitly approved internal lab network and MSF_CONTAINER_NAME")
             if self.executor.lab is None or not hasattr(self.executor.lab, "resolve_target_endpoint"):
                 raise PermissionError("The active Docker lab cannot attest the selected target endpoint")
+            self._metasploit_network_context = (network_name, metasploit_container)
+            emit("docker.metasploit_network.prepare.start", network_name=network_name,
+                 container=metasploit_container, target_id=target.target_id)
+            network_setup = self.executor.lab.prepare_metasploit_container(
+                network_name, metasploit_container,
+                container_rpc_port=int(os.getenv("MSFRPC_CONTAINER_PORT", "55553")),
+            )
+            emit("docker.metasploit_network.prepare.end", network_name=network_name,
+                 container=metasploit_container, changed=bool(network_setup.get("changed")))
             attestation = self.executor.lab.resolve_target_endpoint(
                 reproduction.service, reproduction.port, network_name=network_name,
                 metasploit_container=metasploit_container,
             )
+            emit("docker.metasploit_network.attested", network_name=network_name,
+                 target_id=target.target_id, target_host=attestation.get("target_host"),
+                 target_port=attestation.get("target_port"))
             if attestation.get("project") != self.project:
                 raise PermissionError("Docker target attestation belongs to a different lab project")
-            result = MetasploitCandidateRunner(self.metasploit_adapter).run(
+            runner = MetasploitCandidateRunner(self.metasploit_adapter)
+            run_method = runner.verify if self.metasploit_check_only else runner.run
+            result = run_method(
                 plan=plan, bundle=state["bundle"], target=target,
                 reproduction=reproduction, policy=self.execution_policy,
                 target_attestation=attestation,
             )
+            result["network_setup"] = network_setup
             self.executor.report["metasploit"] = result
             if result["status"] == "not_reproduced":
                 self.executor.report["status"] = "not_reproduced"
+            elif result["status"] == "inconclusive":
+                self.executor.report["status"] = "inconclusive"
+            elif result["status"] == "failed":
+                self.executor.report.update(status="execution_error", error="Metasploit execution or session cleanup failed")
             self.executor.save()
             return {"poc_execution": result, "status": self.executor.report["status"]}
         except PermissionError as exc:
@@ -179,8 +210,9 @@ class Pipeline:
 
     @state_boundary(reads=['deployment_ready'], writes=['status'])
     def verification(self, state):
-        """执行独立验证步骤并产出成功判据。"""
-        if state.get("deployment_ready") is True and self.active:
+        """执行独立验证步骤并产出成功判据，即使 Metasploit 结论不确定也保留证据。"""
+        if (state.get("deployment_ready") is True and self.active
+                and self.executor.report.get("status") in {"pending", "inconclusive", "not_reproduced"}):
             self.executor.execute_phase("verify")
             return {"status": self.executor.report["status"]}
         return {}
@@ -189,6 +221,27 @@ class Pipeline:
     def cleanup(self, state):
         """清理实验资源并保存最终执行报告。"""
         if self.active:
+            if self._metasploit_network_context is not None:
+                network_name, container_name = self._metasploit_network_context
+                emit("docker.metasploit_network.restore.start", network_name=network_name,
+                     container=container_name)
+                try:
+                    network_cleanup = self.executor.lab.restore_metasploit_container(
+                        network_name, container_name,
+                    )
+                    self.executor.report.setdefault("metasploit", {})["network_cleanup"] = network_cleanup
+                    emit("docker.metasploit_network.restore.end", network_name=network_name,
+                         container=container_name, restored=network_cleanup.get("restored_to"),
+                         changed=bool(network_cleanup.get("changed")))
+                except Exception as exc:
+                    emit("docker.metasploit_network.restore.error", network_name=network_name,
+                         container=container_name, error_type=type(exc).__name__)
+                    self.executor.report.update(
+                        status="execution_error", cleanup="failed",
+                        cleanup_error=f"Metasploit network cleanup failed: {exc}",
+                    )
+                finally:
+                    self._metasploit_network_context = None
             self.executor.finish()
             self.active = False
             return {"report": self.executor.report, "status": self.executor.report["status"]}
@@ -208,9 +261,9 @@ class Pipeline:
         graph.set_entry_point("researcher")
         graph.add_conditional_edges("researcher", lambda s: "planner" if s["status"] == "researched" else "cleanup")
         graph.add_conditional_edges("planner", lambda s: "deployer" if s["status"] == "planned" else "cleanup")
-        graph.add_edge("deployer", "metasploit")
-        graph.add_edge("metasploit", "reproducer")
-        graph.add_edge("reproducer", "verifier")
+        graph.add_edge("deployer", "reproducer")
+        graph.add_edge("reproducer", "metasploit")
+        graph.add_edge("metasploit", "verifier")
         graph.add_edge("verifier", "cleanup")
         graph.add_edge("cleanup", END)
         return graph.compile()
@@ -239,17 +292,34 @@ class Pipeline:
         executor_options.setdefault("recovery_budget", min(1, policy_recovery_budget)
                                      if self.recovery_controller is not None else 0)
         self.executor = StepExecutor(self.knowledge, self.workspace, self.project, report_path, **executor_options)
+        trace_path = report_path.with_suffix(".trace.jsonl")
+        if trace_path.exists():
+            raise FileExistsError("Trace exists; choose a new report path")
         state = {"identifier": identifier}
-        try:
-            state = graph.invoke(state)
-        except BaseException as exc:
-            if self.active:
-                self.executor.report.update(status="cancelled" if isinstance(exc, KeyboardInterrupt) else "execution_error", error=str(exc))
-            state.update(status="execution_error", error=str(exc))
-            state.update(self.cleanup(state))
-            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
-                raise
-        finally:
-            if "report" in state and not report_path.exists():
-                atomic_json(report_path, state["report"])
+        with TraceRecorder(trace_path, self.project):
+            emit("run.start", identifier=identifier, report=str(report_path))
+            try:
+                for update in graph.stream(state, stream_mode="updates"):
+                    for node, changes in update.items():
+                        if isinstance(changes, dict):
+                            state.update(changes)
+                            emit("stage.end", stage=node, status=state.get("status"),
+                                 updated_keys=sorted(changes))
+                emit("run.end", status=state.get("status"))
+            except BaseException as exc:
+                emit("run.error", error_type=type(exc).__name__)
+                if self.active:
+                    self.executor.report.update(status="cancelled" if isinstance(exc, KeyboardInterrupt) else "execution_error", error=str(exc))
+                state.update(status="execution_error", error=str(exc))
+                state.update(self.cleanup(state))
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+            finally:
+                if "report" in state:
+                    state["report"]["trace_path"] = str(trace_path)
+                    if self.executor.report is not None:
+                        self.executor.report["trace_path"] = str(trace_path)
+                        self.executor.save()
+                    elif not report_path.exists():
+                        atomic_json(report_path, state["report"])
         return state["report"]

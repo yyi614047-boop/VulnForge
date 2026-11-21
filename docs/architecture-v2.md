@@ -318,3 +318,10 @@ Live Docker daemon, Metasploit RPC, exploit execution, and teardown validation r
 Run the opt-in real-Docker network integration test with `VULNFORGE_DOCKER_INTEGRATION=1 python -m pytest -q tests/test_docker_isolation_integration.py`. It verifies peer reachability on the internal lab network, blocked external egress, and the one-network-only container attachment invariant. The default unit suite skips this test unless explicitly enabled.
 
 The same opt-in Docker integration suite also starts a real Compose target and a separate lab-side container, then exercises `DockerLab.resolve_target_endpoint` against Docker Inspect results to verify the live port mapping, network ID, container IDs, private addresses, and Compose fingerprint.
+
+
+## Live Metasploit execution status
+
+The primary LangGraph Pipeline now has an opt-in Metasploit RPC stage. After the reviewed Compose target starts, the stage rejects any published RPC port, moves the Metasploit container from Docker's default bridge onto the exact approved internal network, verifies the target and Metasploit container attachments, and binds the module invocation to the resulting Docker endpoint attestation. RPC requests travel through Docker Exec to a daemon bound only to 127.0.0.1 inside the Metasploit container. The stage then runs module.check and permits module.execute only after the same adapter instance observed the exact vulnerable result. Execute/session cleanup failures and inconclusive checks stop the success path; the existing independent verifier remains responsible for success. The opt-in live fixture test uses a harmless auxiliary scanner to validate the real Framework RPC Check/Execute path without requiring an exploit session.
+
+The Metasploit RPC control plane uses Docker Exec rather than a published RPC port. The daemon binds only to 127.0.0.1 inside its container; the host forwards bounded, allowlisted MessagePack RPC calls through the Docker daemon. This keeps the Metasploit container attached only to the approved internal lab network and avoids a second host-facing network interface.

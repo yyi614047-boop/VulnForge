@@ -7,9 +7,11 @@ general-purpose RPC or console passthrough.
 from __future__ import annotations
 
 import ipaddress
+import base64
 import os
 import re
 import ssl
+import subprocess
 import time
 from typing import Callable
 from urllib.error import URLError
@@ -23,10 +25,24 @@ from app.domain.poc_execution import (
 )
 from app.domain.policies import ExecutionPolicy
 from app.domain.targets import TargetSpec
+from app.runtime.tracing import emit, traced_call
 
 
 class MetasploitRpcError(RuntimeError):
     pass
+
+
+class MetasploitJobCleanupError(MetasploitRpcError):
+    """Raised when a timed-out Metasploit job cannot be confirmed stopped."""
+
+class MetasploitExecutionError(MetasploitRpcError):
+    """Execution failed and one or more cleanup actions also failed."""
+
+    def __init__(self, message: str, *, cleanup_errors: list[str]):
+        super().__init__(message)
+        self.cleanup_errors = cleanup_errors
+
+
 
 
 class MessagePackHttpTransport:
@@ -44,8 +60,10 @@ class MessagePackHttpTransport:
             raise ValueError("Metasploit RPC server must be bound to loopback in V1")
         if not 1 <= port <= 65535 or not 1 <= timeout <= 120:
             raise ValueError("Invalid Metasploit RPC port or timeout")
-        if not endpoint.startswith("/") or ".." in endpoint.split("/"):
-            raise ValueError("RPC endpoint must be an absolute, traversal-free path")
+        if (not isinstance(endpoint, str)
+                or not re.fullmatch(r"/[A-Za-z0-9._~/-]*", endpoint)
+                or ".." in endpoint.split("/")):
+            raise ValueError("RPC endpoint must be an absolute, traversal-free path with safe characters")
         self.host, self.port = host, port
         self.ssl_enabled, self.endpoint = ssl_enabled, endpoint
         self.timeout, self.opener = timeout, opener
@@ -72,14 +90,95 @@ class MessagePackHttpTransport:
         except (URLError, TimeoutError, OSError, ValueError) as exc:
             raise MetasploitRpcError(f"Metasploit RPC transport failed: {exc}") from exc
         if isinstance(payload, dict) and payload.get("error"):
-            raise MetasploitRpcError(str(payload["error"]))
+            raise MetasploitRpcError(str(payload.get("error_message") or payload.get("error_class") or payload["error"]))
         return payload
+
+
+class DockerExecMessagePackTransport:
+    """Send the narrow MessagePack RPC request through docker exec, not a published port.
+
+    The Metasploit daemon binds to 127.0.0.1 inside its container. Docker Exec is the
+    control channel, so the container needs only its single approved internal network.
+    """
+
+    def __init__(self, container: str, *, port: int = 55553, endpoint: str = "/api/",
+                 timeout: int = 15, runner: Callable = subprocess.run):
+        if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", container):
+            raise ValueError("Invalid Metasploit Docker container name")
+        if not 1 <= port <= 65535 or not 1 <= timeout <= 120:
+            raise ValueError("Invalid Metasploit RPC port or timeout")
+        if (not isinstance(endpoint, str)
+                or not re.fullmatch(r"/[A-Za-z0-9._~/-]*", endpoint)
+                or ".." in endpoint.split("/")):
+            raise ValueError("RPC endpoint must be an absolute, traversal-free path with safe characters")
+        self.container, self.port, self.endpoint = container, port, endpoint
+        self.timeout, self.runner = timeout, runner
+
+    def call(self, method: str, *params):
+        try:
+            import msgpack
+        except ImportError as exc:
+            raise RuntimeError(
+                "MessagePack support is optional; install with pip install -e '.[metasploit]'"
+            ) from exc
+        payload = msgpack.packb([method, *params], use_bin_type=True)
+        ruby = f"""
+require 'base64'
+require 'net/http'
+require 'uri'
+uri = URI('http://127.0.0.1:{self.port}{self.endpoint}')
+request = Net::HTTP::Post.new(uri)
+request['Content-Type'] = 'binary/message-pack'
+request['Accept'] = 'binary/message-pack'
+request.body = STDIN.read
+http = Net::HTTP.new(uri.host, uri.port, nil)
+http.open_timeout = {self.timeout}
+http.read_timeout = {self.timeout}
+response = http.start {{ |client| client.request(request) }}
+STDOUT.write(Base64.strict_encode64(response.body))
+"""
+        try:
+            result = self.runner(
+                ["docker", "exec", "-i", self.container, "ruby", "-e", ruby],
+                input=payload, capture_output=True, timeout=self.timeout + 5, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise MetasploitRpcError(f"Docker Exec RPC transport failed: {exc}") from exc
+        if result.returncode:
+            detail = result.stderr.decode("utf-8", errors="replace") if isinstance(result.stderr, bytes) else str(result.stderr)
+            raise MetasploitRpcError(f"Docker Exec RPC transport failed: {detail}")
+        try:
+            encoded = result.stdout.decode("ascii") if isinstance(result.stdout, bytes) else str(result.stdout)
+            response = msgpack.unpackb(base64.b64decode(encoded), raw=False, strict_map_key=False)
+
+            def normalize_messagepack(value):
+                # Metasploit's Ruby MessagePack encoder emits Hash keys as binary strings.
+                # Normalize those keys (and any binary string values) for Python callers.
+                if isinstance(value, bytes):
+                    return value.decode("utf-8", errors="replace")
+                if isinstance(value, dict):
+                    return {
+                        normalize_messagepack(key): normalize_messagepack(item)
+                        for key, item in value.items()
+                    }
+                if isinstance(value, list):
+                    return [normalize_messagepack(item) for item in value]
+                if isinstance(value, tuple):
+                    return tuple(normalize_messagepack(item) for item in value)
+                return value
+
+            response = normalize_messagepack(response)
+        except Exception as exc:
+            raise MetasploitRpcError(f"Invalid MessagePack response from Metasploit Docker Exec: {exc}") from exc
+        if isinstance(response, dict) and response.get("error"):
+            raise MetasploitRpcError(str(response.get("error_message") or response.get("error_class") or response["error"]))
+        return response
 
 
 class MetasploitRpcClient:
     """Authenticated RPC client with a narrow, explicit API allowlist."""
 
-    ALLOWED_METHODS = {"core.version", "module.check", "module.execute", "module.results", "job.stop", "session.list", "session.stop"}
+    ALLOWED_METHODS = {"core.version", "module.check", "module.execute", "module.results", "job.list", "job.stop", "session.list", "session.stop"}
 
     def __init__(self, transport, *, username: str, password: str):
         if not username or not password:
@@ -91,12 +190,22 @@ class MetasploitRpcClient:
     @classmethod
     def from_env(cls, *, transport=None):
         if transport is None:
-            transport = MessagePackHttpTransport(
-                host=os.getenv("MSFRPC_HOST", "127.0.0.1"),
-                port=int(os.getenv("MSFRPC_PORT", "55553")),
-                ssl_enabled=os.getenv("MSFRPC_SSL", "true").lower() in {"1", "true", "yes"},
-                endpoint=os.getenv("MSFRPC_URI", "/api/"),
-            )
+            transport_kind = os.getenv("MSFRPC_TRANSPORT", "docker-exec" if os.getenv("MSF_CONTAINER_NAME") else "http")
+            if transport_kind == "docker-exec":
+                container = os.getenv("MSF_CONTAINER_NAME", "")
+                transport = DockerExecMessagePackTransport(
+                    container, port=int(os.getenv("MSFRPC_CONTAINER_PORT", "55553")),
+                    endpoint=os.getenv("MSFRPC_URI", "/api/"),
+                )
+            elif transport_kind == "http":
+                transport = MessagePackHttpTransport(
+                    host=os.getenv("MSFRPC_HOST", "127.0.0.1"),
+                    port=int(os.getenv("MSFRPC_PORT", "55553")),
+                    ssl_enabled=os.getenv("MSFRPC_SSL", "true").lower() in {"1", "true", "yes"},
+                    endpoint=os.getenv("MSFRPC_URI", "/api/"),
+                )
+            else:
+                raise ValueError("MSFRPC_TRANSPORT must be docker-exec or http")
         return cls(
             transport,
             username=os.environ.get("MSFRPC_USER", ""),
@@ -109,24 +218,40 @@ class MetasploitRpcClient:
         if method == "auth.login":
             raise ValueError("Authentication is managed internally")
         if self.token is None:
-            auth = self.transport.call("auth.login", self.username, self.password)
+            auth = traced_call(
+                "metasploit.rpc", "auth.login", {"username": self.username},
+                lambda: self.transport.call("auth.login", self.username, self.password),
+            )
             if not isinstance(auth, dict) or auth.get("result") != "success" or not auth.get("token"):
-                raise MetasploitRpcError("Metasploit RPC authentication failed")
+                # Include only server diagnostics and response keys; never echo credentials or tokens.
+                detail = auth.get("error_message") or auth.get("error_class") if isinstance(auth, dict) else type(auth).__name__
+                keys = sorted(str(key) for key in auth.keys()) if isinstance(auth, dict) else []
+                raise MetasploitRpcError(
+                    f"Metasploit RPC authentication failed: {detail or 'unexpected auth response'}; "
+                    f"response_keys={keys}"
+                )
             self.token = str(auth["token"])
-        response = self.transport.call(method, self.token, *params)
+        response = traced_call(
+            "metasploit.rpc", method, {"parameter_count": len(params)},
+            lambda: self.transport.call(method, self.token, *params),
+        )
         if isinstance(response, dict) and response.get("error"):
-            raise MetasploitRpcError(str(response["error"]))
+            raise MetasploitRpcError(str(response.get("error_message") or response.get("error_class") or response["error"]))
         return response
 
 
 class MetasploitRpcAdapter:
     """Run module.check and module.execute only for explicitly approved lab candidates."""
 
-    def __init__(self, client: MetasploitRpcClient, *, poll_interval: float = 0.5):
+    def __init__(self, client: MetasploitRpcClient, *, poll_interval: float = 0.5,
+                 job_cleanup_timeout: float = 5.0):
         if not 0.1 <= poll_interval <= 5:
             raise ValueError("poll_interval must be between 0.1 and 5 seconds")
+        if not 0.1 <= job_cleanup_timeout <= 30:
+            raise ValueError("job_cleanup_timeout must be between 0.1 and 30 seconds")
         self.client = client
         self.poll_interval = poll_interval
+        self.job_cleanup_timeout = job_cleanup_timeout
         self._validated_checks: dict[str, tuple[str, str, str]] = {}
 
     @staticmethod
@@ -193,25 +318,76 @@ class MetasploitRpcAdapter:
             compatibility_status=spec.compatibility_status,
         )
 
-    def _wait_for_result(self, job_id: int, job_uuid: str, timeout: int) -> dict:
+    def _stop_job_and_confirm(self, job_id: int, job_uuid: str) -> None:
+        """Stop a timed-out job and confirm it is absent from Metasploit's active job list."""
+        stop_error = None
+        try:
+            self.client.call("job.stop", job_id)
+        except Exception as exc:
+            stop_error = exc
+
+        deadline = time.monotonic() + self.job_cleanup_timeout
+        while True:
+            try:
+                active_jobs = self.client.call("job.list")
+            except Exception as exc:
+                detail = f"; job.stop error: {stop_error}" if stop_error else ""
+                raise MetasploitJobCleanupError(
+                    f"Could not confirm Metasploit job {job_uuid} stopped: job.list failed: {exc}{detail}"
+                ) from exc
+            if not isinstance(active_jobs, dict):
+                raise MetasploitJobCleanupError(
+                    f"Could not confirm Metasploit job {job_uuid} stopped: malformed job.list response"
+                )
+            if str(job_id) not in {str(key) for key in active_jobs}:
+                return
+            if time.monotonic() >= deadline:
+                detail = f"; job.stop error: {stop_error}" if stop_error else ""
+                raise MetasploitJobCleanupError(
+                    f"Metasploit job {job_uuid} remained active after stop request{detail}"
+                )
+            time.sleep(min(self.poll_interval, max(0, deadline - time.monotonic())))
+
+    def _wait_for_result(self, job_id: int, job_uuid: str, timeout: int, *,
+                         allow_no_session: bool = False) -> dict:
         if not 1 <= timeout <= 300:
             raise ValueError("Metasploit job timeout must be between 1 and 300 seconds")
+        emit("metasploit.job.wait.start", job_id=job_id, job_uuid=job_uuid, timeout_seconds=timeout)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            result = self.client.call("module.results", job_uuid)
+            try:
+                result = self.client.call("module.results", job_uuid)
+            except MetasploitRpcError as exc:
+                # Some valid exploit modules intentionally produce a non-session
+                # effect (e.g. a file write). Metasploit reports this as an RPC
+                # error even after the job has finished. Treat it only as a
+                # completed invocation after job.list confirms termination;
+                # independent target verification remains mandatory.
+                if allow_no_session and "no session created" in str(exc).lower():
+                    active_jobs = self.client.call("job.list")
+                    if isinstance(active_jobs, dict) and str(job_id) not in {str(key) for key in active_jobs}:
+                        emit("metasploit.job.completed", job_id=job_id, job_uuid=job_uuid,
+                             status="completed_without_session")
+                        return {"status": "completed", "result": {
+                            "session_created": False,
+                            "message": "No session created; independent verification required",
+                        }}
+                raise
             if not isinstance(result, dict):
+                emit("metasploit.job.failed", job_id=job_id, job_uuid=job_uuid, reason="malformed_result")
                 raise MetasploitRpcError("Metasploit returned a malformed module result")
             status = str(result.get("status", "")).lower()
             if status == "completed":
+                emit("metasploit.job.completed", job_id=job_id, job_uuid=job_uuid)
                 return result
-            if status in {"failed", "error"}:
+            if status in {"failed", "errored", "error"}:
+                emit("metasploit.job.failed", job_id=job_id, job_uuid=job_uuid, status=status)
                 raise MetasploitRpcError(f"Metasploit module job {status}: {result}")
-            time.sleep(self.poll_interval)
-        try:
-            self.client.call("job.stop", job_id)
-        except Exception:
-            pass
-        raise TimeoutError(f"Metasploit module job {job_uuid} exceeded {timeout} seconds")
+            time.sleep(min(self.poll_interval, max(0, deadline - time.monotonic())))
+        emit("metasploit.job.timeout", job_id=job_id, job_uuid=job_uuid, timeout_seconds=timeout)
+        self._stop_job_and_confirm(job_id, job_uuid)
+        emit("metasploit.job.stopped", job_id=job_id, job_uuid=job_uuid, reason="timeout")
+        raise TimeoutError(f"Metasploit module job {job_uuid} exceeded {timeout} seconds; stop confirmed")
 
     def check(self, spec: PoCExecutionSpec, candidate: PoCCandidate,
               target: TargetSpec, policy: ExecutionPolicy, *, timeout: int = 60) -> MetasploitCheckOutcome:
@@ -235,6 +411,8 @@ class MetasploitRpcAdapter:
                 )
             raise
         job_id, job_uuid = self._ticket(response)
+        emit("metasploit.job.created", job_id=job_id, job_uuid=job_uuid, operation="check",
+             candidate_id=candidate.candidate_id, target_id=target.target_id)
         completed = self._wait_for_result(job_id, job_uuid, timeout)
         result = completed.get("result") or {}
         code = str(result.get("code", "unknown")).lower() if isinstance(result, dict) else "unknown"
@@ -270,27 +448,49 @@ class MetasploitRpcAdapter:
                 or check_outcome.module_metadata_sha256 != candidate.metadata_sha256):
             raise PermissionError("Exploit execution requires a completed vulnerable Check from the same adapter instance")
         before_sessions = self.client.call("session.list") or {}
+        if not isinstance(before_sessions, dict):
+            raise MetasploitRpcError("Metasploit returned a malformed pre-execution session list")
         response = self.client.call("module.execute", "exploit", self._module_name(spec), spec.options)
         job_id, job_uuid = self._ticket(response)
+        emit("metasploit.job.created", job_id=job_id, job_uuid=job_uuid, operation="execute",
+             candidate_id=candidate.candidate_id, target_id=target.target_id)
         stopped = []
+        cleanup_errors = []
+        completed = None
+        execution_error = None
         try:
-            completed = self._wait_for_result(job_id, job_uuid, timeout)
+            completed = self._wait_for_result(job_id, job_uuid, timeout, allow_no_session=True)
+        except Exception as exc:
+            execution_error = exc
         finally:
             # Always attempt to stop only sessions created by this module for
             # this exact target during this invocation, including timeout paths.
             try:
                 after_sessions = self.client.call("session.list") or {}
-                stopped = self._stop_new_target_sessions(before_sessions, after_sessions, spec)
-            except Exception:
-                stopped = []
-        result = completed.get("result") or {}
+                if not isinstance(after_sessions, dict):
+                    raise MetasploitRpcError("Metasploit returned a malformed post-execution session list")
+                stopped, cleanup_errors = self._stop_new_target_sessions(before_sessions, after_sessions, spec)
+            except Exception as exc:
+                cleanup_errors.append(f"Could not inspect sessions for cleanup: {exc}")
+
+        if execution_error is not None:
+            if cleanup_errors:
+                details = "; ".join(cleanup_errors)
+                raise MetasploitExecutionError(
+                    f"Metasploit execution failed ({execution_error}); session cleanup also failed ({details})",
+                    cleanup_errors=cleanup_errors,
+                ) from execution_error
+            raise execution_error
+
+        result = (completed or {}).get("result") or {}
         return MetasploitExecutionOutcome(
             candidate_id=candidate.candidate_id,
             target_id=target.target_id,
             job_uuid=job_uuid,
-            status="completed",
+            status="failed" if cleanup_errors else "completed",
             result=result if isinstance(result, dict) else {"value": str(result)},
             cleaned_session_ids=stopped,
+            cleanup_errors=cleanup_errors,
         )
 
     @staticmethod
@@ -304,8 +504,9 @@ class MetasploitRpcAdapter:
         return job_id, response["uuid"]
 
     def _stop_new_target_sessions(self, before: dict, after: dict,
-                                  spec: PoCExecutionSpec) -> list[int]:
+                                  spec: PoCExecutionSpec) -> tuple[list[int], list[str]]:
         stopped = []
+        errors = []
         module_name = self._module_name(spec)
         for raw_id, session in after.items():
             if str(raw_id) in {str(key) for key in before} or not isinstance(session, dict):
@@ -316,8 +517,25 @@ class MetasploitRpcAdapter:
                 continue
             try:
                 session_id = int(raw_id)
+                emit("metasploit.session.created", session_id=session_id, target_host=host,
+                     via_exploit=via, target_id=spec.target_id, candidate_id=spec.candidate_id)
+                emit("metasploit.session.stop.requested", session_id=session_id)
                 self.client.call("session.stop", session_id)
-                stopped.append(session_id)
-            except Exception:
-                continue
-        return stopped
+                deadline = time.monotonic() + self.job_cleanup_timeout
+                while True:
+                    active_sessions = self.client.call("session.list")
+                    if not isinstance(active_sessions, dict):
+                        raise MetasploitRpcError("Metasploit returned a malformed session list during cleanup")
+                    if str(session_id) not in {str(key) for key in active_sessions}:
+                        stopped.append(session_id)
+                        emit("metasploit.session.closed", session_id=session_id, confirmed=True)
+                        break
+                    if time.monotonic() >= deadline:
+                        raise MetasploitJobCleanupError(
+                            f"Metasploit session {session_id} remained active after stop request"
+                        )
+                    time.sleep(min(self.poll_interval, max(0, deadline - time.monotonic())))
+            except Exception as exc:
+                emit("metasploit.session.cleanup_error", session_id=str(raw_id), error_type=type(exc).__name__)
+                errors.append(f"Could not confirm Metasploit session {raw_id} stopped: {exc}")
+        return stopped, errors

@@ -11,7 +11,7 @@ permissions:
 jobs:
   unit:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,10 +19,18 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install package and test dependencies
-        run: python -m pip install -e ".[dev]"
+        run: python -m pip install -e ".[dev,metasploit]"
       - name: Run unit tests
         run: python -m pytest -q
       - name: Verify real Docker internal-network isolation
         run: python -m pytest -q tests/test_docker_isolation_integration.py
         env:
           VULNFORGE_DOCKER_INTEGRATION: "1"
+      - name: Verify live Metasploit RPC Check and Execute
+        run: python -m pytest -q tests/test_metasploit_live_integration.py
+        env:
+          VULNFORGE_MSF_INTEGRATION: "1"
+      - name: Real Apache CVE-2021-41773 end-to-end acceptance
+        run: python -m pytest -q tests/test_real_cve_e2e.py
+        env:
+          VULNFORGE_REAL_CVE_E2E: "1"

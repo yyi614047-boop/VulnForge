@@ -35,12 +35,26 @@ def test_failed_deployment_blocks_metasploit_reproduction_and_verification(tmp_p
     assert pipeline.executor.phases == []
 
 
-def test_successful_deployment_allows_independent_verification_even_after_metasploit_outcome(tmp_path: Path):
+def test_independent_http_verification_collects_evidence_after_inconclusive_metasploit(tmp_path: Path):
     pipeline = Pipeline(tmp_path, tmp_path / "workspace", "stage-gate-verify")
     pipeline.active = True
     pipeline.executor = DummyExecutor()
+    pipeline.executor.report["status"] = "inconclusive"
 
-    result = pipeline.verification({"deployment_ready": True, "status": "not_reproduced"})
+    result = pipeline.verification({"deployment_ready": True, "status": "inconclusive"})
 
-    assert result == {"status": "pending"}
+    assert result == {"status": "inconclusive"}
     assert pipeline.executor.phases == ["verify"]
+    assert pipeline.executor.report["status"] == "inconclusive"
+
+
+
+def test_graph_declares_reproduction_before_metasploit_and_independent_verifier():
+    import inspect
+
+    source = inspect.getsource(Pipeline.graph)
+    deploy = source.index('graph.add_edge("deployer", "reproducer")')
+    metasploit = source.index('graph.add_edge("reproducer", "metasploit")')
+    verifier = source.index('graph.add_edge("metasploit", "verifier")')
+    cleanup = source.index('graph.add_edge("verifier", "cleanup")')
+    assert deploy < metasploit < verifier < cleanup

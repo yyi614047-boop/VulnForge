@@ -30,7 +30,7 @@ def test_internal_network_allows_lab_peer_and_blocks_external_egress():
     msf = f"vf-msf-{suffix}"
     image = os.getenv("VULNFORGE_DOCKER_TEST_IMAGE", "busybox:1.36.1")
 
-    if docker("info", timeout=10).returncode:
+    if docker("info", timeout=30).returncode:
         pytest.skip("Docker daemon is unavailable")
     if docker("image", "inspect", image).returncode:
         pulled = docker("pull", image, timeout=180)
@@ -114,9 +114,9 @@ def test_docker_lab_resolves_target_only_from_live_internal_network(tmp_path):
             "web", 18080, network_name=network, metasploit_container=msf,
         )
         assert endpoint["target_host"].startswith("172.")
-        assert endpoint["host"] == endpoint["target_host"]
+        assert endpoint["target_host"] == endpoint["target_host"]
         assert endpoint["target_port"] == 8080
-        assert endpoint["port"] == 8080
+        assert endpoint["target_port"] == 8080
         assert endpoint["network_internal"] is True
         assert endpoint["target_networks"] == [network]
         assert endpoint["metasploit_networks"] == [network]

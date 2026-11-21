@@ -1,153 +1,124 @@
 # Metasploit integration
 
-## Scope and status
+## Current status
 
-Metasploit is VulnForge's primary source for existing exploit modules. The first integration milestone provides **read-only CVE discovery and module inspection**. It does not execute module checks or exploit payloads, and it is not yet connected to the LangGraph reproduction execution path.
+Metasploit discovery, policy-gated RPC, and the Docker-isolated lab integration are implemented. The primary workflow supports two distinct modes:
+
+- **Independent verification (recommended):** run the reproduction first, then call the inspected Metasploit module's non-invasive `check` method. No exploit is executed by this mode.
+- **Explicit exploit execution (opt-in):** run `check`, and only after a completed `vulnerable` result, invoke `module.execute`. This is a separate, higher-risk mode and requires its own policy approval.
+
+The live CI fixture is a harmless custom Auxiliary scanner. It validates the real Framework RPC protocol and Docker isolation; it is not a real CVE exploit and does not establish a shell session.
 
 ## Components
 
-- `app/domain/poc.py`: typed `PoCCandidate` and `PoCOption` domain contracts.
-- `app/discovery/metasploit.py`: deterministic `MetasploitDiscovery` service.
-- `app/cli.py`: `metasploit-search` and `metasploit-inspect` commands.
-- `tests/test_metasploit_discovery.py`: offline tests using a fake subprocess runner.
+- `app/discovery/metasploit.py`: CVE search and module inspection through `msfconsole`.
+- `app/domain/poc.py`: typed, provenance-aware `PoCCandidate` records.
+- `app/domain/poc_execution.py`: target-bound execution specification, compatibility assessment, and Docker network attestation.
+- `app/execution/metasploit_rpc.py`: allowlisted MessagePack RPC client, Docker Exec transport, and policy-gated adapter.
+- `app/workflows/reproduction/metasploit.py`: candidate validation and check-only / check-then-execute orchestration.
+- `app/workflows/reproduction/graph.py`: LangGraph lifecycle and fail-closed stage gates.
 
-## Setup
+## Discovery and inspection
 
-Install Metasploit Framework separately and ensure `msfconsole` is on `PATH`. VulnForge does not install or bundle the Framework.
+Install the Framework separately; VulnForge does not bundle it. Ensure `msfconsole` is available.
 
-## Usage
-
-Search modules referencing a CVE:
+Search and inspect modules for a CVE:
 
 ```bash
 python -m app.cli --action metasploit-search --cve CVE-2021-44228
+python -m app.cli --action metasploit-inspect --cve CVE-2021-44228 \
+  --module exploit/multi/http/log4shell_header_injection
 ```
 
-Inspect one module:
-
-```bash
-python -m app.cli --action metasploit-inspect --cve CVE-2021-44228 --module exploit/multi/http/log4shell_header_injection
-```
-
-Override the executable and timeout when needed:
-
-```bash
-python -m app.cli --action metasploit-search --cve CVE-2021-44228 --msfconsole /opt/metasploit-framework/msfconsole --msf-timeout 240
-```
-
-## Candidate contract
-
-An inspected module becomes a `PoCCandidate` containing:
-
-- stable candidate ID and source/module identity;
-- requested CVE and module type;
-- name, description, rank, disclosure date, and references when available;
-- target names and parsed module options when exposed by console output;
-- explicit check-support metadata only when the output says so;
-- bounded raw metadata excerpt and SHA-256 digest.
-
-The parser is intentionally conservative. Missing fields remain empty/unknown; it does not infer supported product versions or check capability from a module name. Raw metadata is retained for later inspection and auditing.
-
-## Safety boundary
-
-- CVE values and module paths are validated before they are inserted into a console command.
-- Commands are passed as an argument vector with `shell=False`; arbitrary shell input is not accepted.
-- Only `search` and `info` are invoked in this milestone.
-- No `check`, `exploit`, `run`, payload, session, or arbitrary console command is exposed.
-- Discovery is not authorization. A returned candidate must still be assessed against the approved target and explicit execution policy.
-- A search result is not proof that a module supports the target version or can reproduce the CVE.
-
-## Next milestones
-
-1. Connect candidates to the Researcher bundle and let Planner compare existing PoC candidates against the selected target.
-2. Add target compatibility checks based on module references, targets, options, and reviewed target facts; unknown compatibility must remain unknown.
-3. Implement a dedicated Metasploit RPC transport and policy-gated non-invasive `check` operation where supported.
-4. Add exploit execution only after explicit action-level authorization, target binding, timeout/resource limits, output capture, and session cleanup are tested.
-5. Feed structured results into the independent Verifier; module success text or a session alone is not sufficient evidence.
-
-
-## Researcher and Planner integration (second milestone)
-
-Metasploit discovery is opt-in in the primary CLI workflow:
+Discovery is opt-in in the main workflow:
 
 ```bash
 python -m app.cli CVE-2021-44228 --action research --discover-metasploit
 python -m app.cli CVE-2021-44228 --action plan --policy-file policies/local.json --discover-metasploit
-python -m app.cli CVE-2021-44228 --action run --policy-file policies/local.json --discover-metasploit
 ```
 
-When enabled, the Researcher adds up to 10 inspected candidates to its bundle. Provider errors fail the research stage rather than being silently represented as an empty result. When disabled, existing workflows do not require Metasploit to be installed.
+The Researcher stores inspected candidates and their metadata hashes in its bundle. The Planner may select a candidate for review, but selection is not compatibility proof or execution authorization. Product/version compatibility remains `unknown` unless independently supported by evidence.
 
-The Planner receives compact candidate metadata and may propose one candidate for human review. Deterministic checks require that the candidate:
-- is present in the Researcher bundle;
-- is an inspected Metasploit `exploit` module (not an auxiliary scanner);
-- explicitly references the target CVE.
+## Docker Exec RPC setup
 
-The selected candidate ID and rationale are recorded in the canonical `ExecutionPlan`. The candidate list's SHA-256 fingerprint is also included in `input_fingerprints`, and is revalidated before deployment. Raw module excerpts are excluded from the Planner prompt to keep the context bounded, but remain in the Researcher report for audit.
-
-This selection is **not** a compatibility determination or execution authorization. Product/version compatibility remains unverified unless separately grounded. The selected candidate is not executed; the existing fixed reproduction lifecycle is unchanged. If no LLM is configured, candidates are surfaced for manual review and no automatic selection is made.
-
-
-## Execution proposal and compatibility gate (third milestone)
-
-The domain now defines `PoCExecutionSpec` and `CompatibilityAssessment` in `app/domain/poc_execution.py`.
-
-A proposal binds one inspected Metasploit exploit to:
-- the exact target ID and target fingerprint;
-- the CVE independently present in module metadata;
-- a loopback target host and a port declared by the selected lab environment;
-- known module options, with `RHOSTS` and `RPORT` derived from the bound target;
-- the inspected module metadata SHA-256.
-
-The compatibility gate rejects non-Metasploit/non-exploit candidates, uninspected modules, missing or mismatched module CVE references, non-loopback destinations, undeclared ports, unknown option names, caller overrides of `RHOSTS`/`RPORT`, and missing required options.
-
-**Compatibility remains `unknown` unless independent product/version evidence exists.** Metasploit's target labels and rank are retained as metadata, but are not treated as proof that the module supports the lab's product/version.
-
-The spec always carries `approval_required=true`. This milestone only constructs and validates a review proposal; it does not invoke `check`, `exploit`, RPC, payloads, or sessions. Execution remains blocked until a separately authorized RPC adapter and explicit policy gate are implemented.
-
-
-## Policy-gated RPC adapter (fourth milestone)
-
-The optional `app/execution/metasploit_rpc.py` adapter uses Metasploit's HTTP MessagePack RPC API. Install the optional dependency with:
+Install the optional dependency:
 
 ```bash
-pip install -e ".[metasploit]"
+python -m pip install -e ".[metasploit]"
 ```
 
-Start the Metasploit Framework RPC daemon bound to loopback, for example:
+Run a Metasploit container with its RPC daemon bound only to container loopback. Do not publish port 55553:
 
 ```bash
-msfrpcd -U vulnforge -P '<strong-password>' -a 127.0.0.1 -p 55553 -S -f
+export MSFRPC_USER=vulnforge
+export MSFRPC_PASS='replace-with-a-long-random-password'
+export MSFRPC_TRANSPORT=docker-exec
+export MSFRPC_CONTAINER_PORT=55553
+export MSF_CONTAINER_NAME=vulnforge-msf
+
+docker run -d --name "$MSF_CONTAINER_NAME" \
+  -v "$PWD/msf-modules:/root/.msf4/modules:ro" \
+  --entrypoint ruby metasploitframework/metasploit-framework:latest \
+  msfrpcd -U "$MSFRPC_USER" -P "$MSFRPC_PASS" -a 127.0.0.1 -p 55553 -S -n -f
+
+python -m app.cli --action metasploit-rpc-version
 ```
 
-Configure credentials through environment variables (never commit them):
+The Docker Exec transport forwards bounded MessagePack requests through the Docker daemon to `127.0.0.1:55553` inside the Metasploit container. VulnForge rejects containers with a published RPC port, detaches the container from Docker's default bridge, and attaches it only to the exact approved `internal: true` lab network. It attests that the target and Metasploit containers share only that network before sending module requests.
 
-- `MSFRPC_HOST=127.0.0.1`
-- `MSFRPC_PORT=55553`
-- `MSFRPC_SSL=true`
-- `MSFRPC_URI=/api/`
-- `MSFRPC_USER`
-- `MSFRPC_PASS`
+The alternate HTTP transport is restricted to loopback and verifies TLS certificates by default. Never expose the RPC daemon on `0.0.0.0`.
 
-The adapter exposes no arbitrary console/RPC passthrough and the RPC client has an explicit method allowlist. It only supports the named flow:
-1. `module.check` on an inspected exploit; modules without a Check method are returned as `unsupported` rather than treated as exploitable;
-2. wait for the module result and require the exact `vulnerable` result code;
-3. `module.execute` only when the same adapter instance has recorded that successful check;
-4. inspect newly created sessions and stop only sessions matching the exact target host and exploit module.
+## Independent verification mode (recommended)
 
-The RPC endpoint itself must be loopback. TLS certificate verification is enabled by default. The transport accepts no non-loopback RPC host.
+The lifecycle is:
 
-### Additional explicit policy fields
+```text
+Deploy target
+  -> Run reviewed reproduction steps
+  -> Metasploit module.check (no exploit execution)
+  -> Independent HTTP/evidence verification
+  -> Cleanup
+```
 
-All Metasploit permissions default to disabled. A reviewed policy must include the exact candidate ID and inspected metadata SHA-256 in `approved_poc_candidates`, then explicitly enable the required flags:
+Run with discovery and check-only verification:
+
+```bash
+python -m app.cli TARGET_ID --specs reproductions --action run \
+  --policy-file policies/local.json --discover-metasploit \
+  --enable-metasploit-verification
+```
+
+The selected candidate must be present exactly once in the Researcher bundle, be an inspected Metasploit exploit module, and independently reference the target CVE. The candidate metadata hash, target fingerprint, reproduction fingerprint, and Docker network attestation are revalidated at runtime.
+
+A completed `vulnerable` check allows the independent verifier to run. A `safe` result is reported as `not_reproduced`. Missing candidates, unsupported checks, unknown results, and RPC failures remain `inconclusive` or failed; they are never silently converted into success. Independent HTTP evidence is still collected after an inconclusive or negative Metasploit result, but it cannot override that status.
+
+## Explicit exploit execution mode
+
+Exploit execution is separate from check-only verification:
+
+```bash
+python -m app.cli TARGET_ID --specs reproductions --action run \
+  --policy-file policies/local.json --discover-metasploit \
+  --enable-metasploit-execution
+```
+
+All Metasploit permissions default to disabled. A reviewed policy must bind the exact candidate ID to its inspected metadata SHA-256 in `approved_poc_candidates`, approve the target fingerprint and exact internal network, and explicitly enable the required action flags:
 
 - `allow_metasploit_check`
 - `allow_metasploit_execute`
-- `allow_unknown_poc_compatibility` (only if the reviewer accepts unknown product/version compatibility)
-- `allow_metasploit_payloads` (only when a reviewed module requires a payload option)
+- `allow_unknown_poc_compatibility` only when a reviewer explicitly accepts unknown product/version compatibility
+- `allow_metasploit_payloads` only when a reviewed module genuinely requires a payload
 
-The active policy must also approve the target fingerprint, loopback host, and published port. A changed module metadata hash invalidates candidate approval.
+The adapter exposes an RPC method allowlist, binds `RHOSTS`/`RPORT` to the attested private target endpoint, requires a vulnerable Check from the same adapter instance before Execute, and attempts to stop only sessions created by the selected module for the exact target. Cleanup failures are reported and prevent success.
 
-### Current limitations
+## Validation
 
-This adapter is not yet wired into LangGraph's Executor or CLI. Its RPC and policy behavior is unit-tested with a fake client; no live Metasploit daemon/module has been exercised by CI. Automatic candidate fallback and end-to-end verifier/report integration are the next milestones.
+Default CI covers unit tests and real Docker internal-network isolation. The dedicated live Metasploit CI step pulls the Framework image and exercises the real MessagePack RPC login/version path, module Check and Execute calls using a harmless Auxiliary fixture, and independent marker verification. It does not claim real-CVE exploit coverage.
+
+To run the live integration locally:
+
+```bash
+VULNFORGE_MSF_INTEGRATION=1 python -m pytest -q tests/test_metasploit_live_integration.py
+```
+
+This requires a working Docker daemon and Internet access for image pulls.

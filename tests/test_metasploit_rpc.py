@@ -19,6 +19,8 @@ class FakeRpcTransport:
         self.calls.append((method, params))
         expected_method, response = self.responses.pop(0)
         assert method == expected_method
+        if isinstance(response, BaseException):
+            raise response
         return response
 
 
@@ -31,6 +33,8 @@ class FakeClient:
         self.calls.append((method, params))
         expected_method, response = self.responses.pop(0)
         assert method == expected_method
+        if isinstance(response, BaseException):
+            raise response
         return response
 
 
@@ -215,12 +219,13 @@ def test_execute_stops_only_new_sessions_matching_this_target_and_module():
             "10": {"target_host": "192.0.2.8", "via_exploit": "exploit/linux/http/demo"},
         }),
         ("session.stop", True),
+        ("session.list", {}),
     ])
     adapter = MetasploitRpcAdapter(client, poll_interval=0.1)
     check = adapter.check(spec, candidate, target, policy, timeout=2)
     result = adapter.execute(spec, candidate, target, policy, check, timeout=2)
     assert result.cleaned_session_ids == [9]
-    assert client.calls[-1] == ("session.stop", (9,))
+    assert ("session.stop", (9,)) in client.calls
 
 
 def test_check_unsupported_is_reported_as_a_candidate_result():
@@ -265,3 +270,265 @@ def test_rpc_rejects_private_target_without_explicit_network_approval():
     spec, _ = build_poc_execution_spec(candidate, target, target_port=8080, target_attestation=attestation)
     with pytest.raises(PermissionError, match="not explicitly approved"):
         MetasploitRpcAdapter(FakeClient([]))._validate_binding(spec, candidate, target, policy, "check")
+
+def test_rpc_errors_preserve_metasploit_error_message_for_unsupported_check():
+    import pytest
+    transport = FakeRpcTransport([
+        ("auth.login", {"result": "success", "token": "token"}),
+        ("module.check", {"error": True, "error_message": "The target module does not implement a check method"}),
+    ])
+    client = MetasploitRpcClient(transport, username="user", password="pass")
+    with pytest.raises(MetasploitRpcError, match="does not implement a check method"):
+        client.call("module.check", "exploit", "demo", {})
+
+
+def test_execute_reports_session_cleanup_failure_instead_of_claiming_success():
+    target, candidate, spec, policy = fixture()
+    client = FakeClient([
+        ("module.check", {"job_id": 1, "uuid": "check-cleanup"}),
+        ("module.results", {"status": "completed", "result": {"code": "vulnerable"}}),
+        ("session.list", {}),
+        ("module.execute", {"job_id": 2, "uuid": "exec-cleanup"}),
+        ("module.results", {"status": "completed", "result": {"message": "done"}}),
+        ("session.list", {"8": {"target_host": "127.0.0.1", "via_exploit": "exploit/linux/http/demo"}}),
+        ("session.stop", RuntimeError("session stop denied")),
+    ])
+    original_call = client.call
+    def call(method, *params):
+        if method == "session.stop":
+            client.calls.append((method, params))
+            raise RuntimeError("session stop denied")
+        return original_call(method, *params)
+    client.call = call
+    adapter = MetasploitRpcAdapter(client, poll_interval=0.1)
+    check = adapter.check(spec, candidate, target, policy, timeout=2)
+    outcome = adapter.execute(spec, candidate, target, policy, check, timeout=2)
+    assert outcome.status == "failed"
+    assert outcome.cleaned_session_ids == []
+    assert "session stop denied" in outcome.cleanup_errors[0]
+
+def test_docker_exec_transport_roundtrips_messagepack_without_publishing_rpc_port():
+    import base64
+    import subprocess
+    import pytest
+    msgpack = pytest.importorskip("msgpack")
+    from app.execution.metasploit_rpc import DockerExecMessagePackTransport
+
+    class Runner:
+        def __call__(self, argv, **kwargs):
+            assert argv[:4] == ["docker", "exec", "-i", "msf"]
+            request = msgpack.unpackb(kwargs["input"], raw=False)
+            assert request == ["core.version", "session-token"]
+            body = msgpack.packb({"version": "6.4.0"}, use_bin_type=True)
+            return subprocess.CompletedProcess(argv, 0, base64.b64encode(body), b"")
+
+    transport = DockerExecMessagePackTransport("msf", runner=Runner())
+    assert transport.call("core.version", "session-token") == {"version": "6.4.0"}
+
+
+def test_rpc_client_defaults_to_docker_exec_when_msf_container_is_configured(monkeypatch):
+    from app.execution.metasploit_rpc import DockerExecMessagePackTransport
+    monkeypatch.setenv("MSF_CONTAINER_NAME", "msf")
+    monkeypatch.setenv("MSFRPC_USER", "user")
+    monkeypatch.setenv("MSFRPC_PASS", "pass")
+    monkeypatch.delenv("MSFRPC_TRANSPORT", raising=False)
+    client = MetasploitRpcClient.from_env()
+    assert isinstance(client.transport, DockerExecMessagePackTransport)
+
+
+def test_docker_exec_transport_rejects_invalid_container_names():
+    import pytest
+    from app.execution.metasploit_rpc import DockerExecMessagePackTransport
+    with pytest.raises(ValueError, match="container name"):
+        DockerExecMessagePackTransport("bad name")
+
+
+
+def test_docker_exec_transport_normalizes_binary_messagepack_hash_keys():
+    import base64
+    import subprocess
+    import pytest
+    msgpack = pytest.importorskip("msgpack")
+    from app.execution.metasploit_rpc import DockerExecMessagePackTransport
+
+    class Runner:
+        def __call__(self, argv, **kwargs):
+            body = msgpack.packb(
+                {b"result": b"success", b"token": b"TEMP-token",
+                 b"nested": {b"version": b"6.4.0"}},
+                use_bin_type=True,
+            )
+            return subprocess.CompletedProcess(argv, 0, base64.b64encode(body), b"")
+
+    transport = DockerExecMessagePackTransport("msf", runner=Runner())
+    assert transport.call("auth.login", "user", "password") == {
+        "result": "success", "token": "TEMP-token",
+        "nested": {"version": "6.4.0"},
+    }
+
+
+def test_docker_exec_transport_rejects_ruby_injection_in_endpoint():
+    import pytest
+    from app.execution.metasploit_rpc import DockerExecMessagePackTransport
+    with pytest.raises(ValueError, match="safe characters"):
+        DockerExecMessagePackTransport("msf", endpoint="/api/'; system('id'); #")
+
+
+def test_timed_out_job_is_stopped_and_absence_is_confirmed(monkeypatch):
+    import pytest
+    from app.execution.metasploit_rpc import MetasploitJobCleanupError
+
+    clock = [0.0]
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.sleep", lambda _: clock.__setitem__(0, clock[0] + 2.0))
+    client = FakeClient([
+        ("module.results", {"status": "running"}),
+        ("job.stop", True),
+        ("job.list", {}),
+    ])
+    adapter = MetasploitRpcAdapter(client, poll_interval=0.1, job_cleanup_timeout=0.2)
+    with pytest.raises(TimeoutError, match="stop confirmed"):
+        adapter._wait_for_result(7, "timed-out-job", timeout=1)
+    assert [name for name, _ in client.calls] == ["module.results", "job.stop", "job.list"]
+
+
+def test_timed_out_job_fails_closed_when_stop_cannot_be_confirmed(monkeypatch):
+    import pytest
+    from app.execution.metasploit_rpc import MetasploitJobCleanupError
+
+    clock = [0.0]
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.sleep", lambda _: clock.__setitem__(0, clock[0] + 2.0))
+    client = FakeClient([
+        ("module.results", {"status": "running"}),
+        ("job.stop", True),
+        ("job.list", {"7": "exploit/demo"}),
+        ("job.list", {"7": "exploit/demo"}),
+    ])
+    adapter = MetasploitRpcAdapter(client, poll_interval=0.1, job_cleanup_timeout=0.2)
+    with pytest.raises(MetasploitJobCleanupError, match="remained active"):
+        adapter._wait_for_result(7, "stuck-job", timeout=1)
+
+
+def test_execute_preserves_timeout_and_reports_session_cleanup_failure(monkeypatch):
+    import pytest
+    from app.execution.metasploit_rpc import MetasploitExecutionError
+
+    target, candidate, spec, policy = fixture()
+    clock = [0.0]
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.sleep", lambda _: clock.__setitem__(0, clock[0] + 2.0))
+    client = FakeClient([
+        ("module.check", {"job_id": 1, "uuid": "check-before-timeout"}),
+        ("module.results", {"status": "completed", "result": {"code": "vulnerable"}}),
+        ("session.list", {}),
+        ("module.execute", {"job_id": 2, "uuid": "exec-timeout"}),
+        ("module.results", {"status": "running"}),
+        ("job.stop", True),
+        ("job.list", {}),
+        ("session.list", {
+            "8": {"target_host": "127.0.0.1", "via_exploit": "exploit/linux/http/demo"}
+        }),
+        ("session.stop", RuntimeError("session stop denied")),
+    ])
+    original_call = client.call
+    def call(method, *params):
+        if method == "session.stop":
+            client.calls.append((method, params))
+            raise RuntimeError("session stop denied")
+        return original_call(method, *params)
+    client.call = call
+    adapter = MetasploitRpcAdapter(client, poll_interval=0.1, job_cleanup_timeout=0.2)
+    check = adapter.check(spec, candidate, target, policy, timeout=2)
+    with pytest.raises(MetasploitExecutionError, match="execution failed") as error:
+        adapter.execute(spec, candidate, target, policy, check, timeout=1)
+    assert "session stop denied" in str(error.value)
+    assert error.value.cleanup_errors
+
+
+def test_metasploit_rpc_calls_are_traced_without_credentials(tmp_path):
+    import json
+    from app.runtime.tracing import TraceRecorder
+
+    transport = FakeRpcTransport([
+        ("auth.login", {"result": "success", "token": "super-secret-token"}),
+        ("core.version", {"version": "6.4.0"}),
+    ])
+    client = MetasploitRpcClient(transport, username="trace-user", password="super-secret-password")
+    trace_path = tmp_path / "rpc.trace.jsonl"
+    with TraceRecorder(trace_path, "trace-run-001"):
+        assert client.call("core.version") == {"version": "6.4.0"}
+
+    events = [json.loads(line) for line in trace_path.read_text().splitlines()]
+    assert [event["event"] for event in events] == [
+        "metasploit.rpc.start", "metasploit.rpc.end",
+        "metasploit.rpc.start", "metasploit.rpc.end",
+    ]
+    trace_text = trace_path.read_text()
+    assert "super-secret-password" not in trace_text
+    assert "super-secret-token" not in trace_text
+
+
+def test_metasploit_job_lifecycle_is_traced(tmp_path):
+    import json
+    from app.runtime.tracing import TraceRecorder
+
+    target, candidate, spec, policy = fixture()
+    client = FakeClient([
+        ("module.check", {"job_id": 42, "uuid": "trace-job-uuid"}),
+        ("module.results", {"status": "completed", "result": {"code": "vulnerable"}}),
+    ])
+    adapter = MetasploitRpcAdapter(client, poll_interval=0.1)
+    trace_path = tmp_path / "job.trace.jsonl"
+    with TraceRecorder(trace_path, "trace-run-002"):
+        outcome = adapter.check(spec, candidate, target, policy, timeout=2)
+
+    events = [json.loads(line) for line in trace_path.read_text().splitlines()]
+    names = [event["event"] for event in events]
+    assert outcome.result_code == "vulnerable"
+    assert "metasploit.job.created" in names
+    assert "metasploit.job.wait.start" in names
+    assert "metasploit.job.completed" in names
+    assert all(event["run_id"] == "trace-run-002" for event in events)
+
+
+def test_execute_accepts_completed_no_session_only_after_job_termination_and_requires_verification():
+    import pytest
+    target, candidate, spec, policy = fixture()
+    client = FakeClient([
+        ("module.check", {"job_id": 10, "uuid": "check-no-session"}),
+        ("module.results", {"status": "completed", "result": {"code": "vulnerable"}}),
+        ("session.list", {}),
+        ("module.execute", {"job_id": 11, "uuid": "execute-no-session"}),
+        ("module.results", MetasploitRpcError("No session created")),
+        ("job.list", {}),
+        ("session.list", {}),
+    ])
+    adapter = MetasploitRpcAdapter(client, poll_interval=0.1)
+    check = adapter.check(spec, candidate, target, policy, timeout=2)
+    outcome = adapter.execute(spec, candidate, target, policy, check, timeout=2)
+    assert outcome.status == "completed"
+    assert outcome.result["session_created"] is False
+    assert "independent verification required" in outcome.result["message"].lower()
+    assert [call[0] for call in client.calls] == [
+        "module.check", "module.results", "session.list",
+        "module.execute", "module.results", "job.list", "session.list",
+    ]
+
+
+def test_execute_does_not_accept_no_session_while_job_is_still_active():
+    import pytest
+    target, candidate, spec, policy = fixture()
+    client = FakeClient([
+        ("module.check", {"job_id": 20, "uuid": "check-active"}),
+        ("module.results", {"status": "completed", "result": {"code": "vulnerable"}}),
+        ("session.list", {}),
+        ("module.execute", {"job_id": 21, "uuid": "execute-active"}),
+        ("module.results", MetasploitRpcError("No session created")),
+        ("job.list", {"21": "running"}),
+        ("session.list", {}),
+    ])
+    adapter = MetasploitRpcAdapter(client, poll_interval=0.1)
+    check = adapter.check(spec, candidate, target, policy, timeout=2)
+    with pytest.raises(MetasploitRpcError, match="No session created"):
+        adapter.execute(spec, candidate, target, policy, check, timeout=2)
