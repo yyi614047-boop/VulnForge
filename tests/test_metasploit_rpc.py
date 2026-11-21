@@ -486,3 +486,44 @@ def test_metasploit_job_lifecycle_is_traced(tmp_path):
     assert "metasploit.job.wait.start" in names
     assert "metasploit.job.completed" in names
     assert all(event["run_id"] == "trace-run-002" for event in events)
+
+
+def test_execute_accepts_completed_no_session_only_after_job_termination_and_requires_verification():
+    import pytest
+    target, candidate, spec, policy = fixture()
+    client = FakeClient([
+        ("module.check", {"job_id": 10, "uuid": "check-no-session"}),
+        ("module.results", {"status": "completed", "result": {"code": "vulnerable"}}),
+        ("session.list", {}),
+        ("module.execute", {"job_id": 11, "uuid": "execute-no-session"}),
+        ("module.results", MetasploitRpcError("No session created")),
+        ("job.list", {}),
+        ("session.list", {}),
+    ])
+    adapter = MetasploitRpcAdapter(client, poll_interval=0.1)
+    check = adapter.check(spec, candidate, target, policy, timeout=2)
+    outcome = adapter.execute(spec, candidate, target, policy, check, timeout=2)
+    assert outcome.status == "completed"
+    assert outcome.result["session_created"] is False
+    assert "independent verification required" in outcome.result["message"].lower()
+    assert [call[0] for call in client.calls] == [
+        "module.check", "module.results", "session.list",
+        "module.execute", "module.results", "job.list", "session.list",
+    ]
+
+
+def test_execute_does_not_accept_no_session_while_job_is_still_active():
+    import pytest
+    target, candidate, spec, policy = fixture()
+    client = FakeClient([
+        ("module.check", {"job_id": 20, "uuid": "check-active"}),
+        ("module.results", {"status": "completed", "result": {"code": "vulnerable"}}),
+        ("session.list", {}),
+        ("module.execute", {"job_id": 21, "uuid": "execute-active"}),
+        ("module.results", MetasploitRpcError("No session created")),
+        ("job.list", {"21": "running"}),
+    ])
+    adapter = MetasploitRpcAdapter(client, poll_interval=0.1)
+    check = adapter.check(spec, candidate, target, policy, timeout=2)
+    with pytest.raises(MetasploitRpcError, match="No session created"):
+        adapter.execute(spec, candidate, target, policy, check, timeout=2)
