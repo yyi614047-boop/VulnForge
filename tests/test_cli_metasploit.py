@@ -27,3 +27,26 @@ def test_cli_exposes_separate_check_only_verification_flag():
     ])
     assert args.enable_metasploit_verification is True
     assert args.enable_metasploit_execution is False
+
+
+def test_happy_path_cli_parses_short_flags_without_redundant_action_or_discovery():
+    from app.cli import _parser
+    args = _parser().parse_args([
+        "CVE-2021-25646", "--policy", "policies/local.json", "--msf-check",
+    ])
+    assert args.identifier == "CVE-2021-25646"
+    assert args.action == "run"
+    assert str(args.policy_file) == "policies/local.json"
+    assert args.enable_metasploit_verification
+    assert not args.enable_metasploit_execution
+
+
+def test_legacy_metasploit_flags_remain_compatible():
+    from app.cli import _parser
+    args = _parser().parse_args([
+        "CVE-2021-25646", "--action", "run", "--policy-file", "policies/local.json",
+        "--discover-metasploit", "--enable-metasploit-verification",
+    ])
+    assert args.action == "run"
+    assert args.enable_metasploit_verification
+    assert args.discover_metasploit

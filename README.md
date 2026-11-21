@@ -85,6 +85,14 @@ On PowerShell use `$env:OPENAI_API_KEY="..."` and `$env:PLANNER_MODEL="gpt-4o"`.
 
 ## CLI
 
+Recommended happy path (after reviewing the target recipe and policy):
+
+```bash
+vulnforge CVE-2021-25646 --policy policies/local.json --msf-check
+```
+
+The default action is `run`, the default specs directory is `reproductions/`, and `--msf-check` implies Metasploit discovery. This mode runs the reviewed reproduction, performs Metasploit Check only, and collects independent evidence. It does **not** execute a Metasploit exploit. The reviewed policy, target and network approvals are still mandatory. Advanced and legacy flags remain supported.
+
 ```bash
 python -m app.cli --action target-search --query CVE-2021-25646
 python -m app.cli --action target-inspect --environment druid/CVE-2021-25646

@@ -31,11 +31,11 @@ def _parser():
     parser.add_argument("--msf-timeout", type=int, default=180, choices=range(1, 901), metavar="SECONDS")
     parser.add_argument("--discover-metasploit", action="store_true", help="Include read-only Metasploit candidates during research/planning")
     parser.add_argument("--enable-metasploit-execution", action="store_true", help="Enable policy-gated Metasploit Check/Execute through an attested internal Docker lab network")
-    parser.add_argument("--enable-metasploit-verification", action="store_true",
+    parser.add_argument("--msf-check", "--enable-metasploit-verification", dest="enable_metasploit_verification", action="store_true",
                         help="Run a policy-gated Metasploit Check after reproduction without executing an exploit")
     parser.add_argument("--environment", help="Relative target directory for target-inspect")
     parser.add_argument("--request-file", type=Path, help="JSON ReproductionRequest for request-validate")
-    parser.add_argument("--policy-file", type=Path, help="Reviewed JSON ExecutionPolicy required for run")
+    parser.add_argument("--policy", "--policy-file", dest="policy_file", type=Path, help="Reviewed JSON ExecutionPolicy required for plan/run")
     parser.add_argument("--specs", type=Path, default=Path("reproductions"),
                         help="Directory containing reviewed YAML reproduction specifications")
     parser.add_argument("--workspace", type=Path, default=Path(".labs"))
@@ -53,6 +53,9 @@ def _parser():
 def main():
     parser = _parser()
     args = parser.parse_args()
+    # The happy-path check flag implies read-only discovery, not exploit execution.
+    if args.enable_metasploit_verification:
+        args.discover_metasploit = True
     if args.action == "inspect":
         path = args.inspect or (Path(args.identifier) if args.identifier else None)
         if path is None:
@@ -172,8 +175,6 @@ def main():
         parser.error("--enable-metasploit-execution requires --discover-metasploit")
     if args.enable_metasploit_verification and args.enable_metasploit_execution:
         parser.error("Choose check-only verification or exploit execution, not both")
-    if (args.enable_metasploit_verification or args.enable_metasploit_execution) and not args.discover_metasploit:
-        parser.error("Metasploit verification/execution requires --discover-metasploit")
     if args.enable_metasploit_verification and args.action != "run":
         parser.error("--enable-metasploit-verification is only valid with --action run")
     if args.action in {"plan", "run"} and not args.policy_file:
