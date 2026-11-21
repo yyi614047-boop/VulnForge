@@ -522,6 +522,7 @@ def test_execute_does_not_accept_no_session_while_job_is_still_active():
         ("module.execute", {"job_id": 21, "uuid": "execute-active"}),
         ("module.results", MetasploitRpcError("No session created")),
         ("job.list", {"21": "running"}),
+        ("session.list", {}),
     ])
     adapter = MetasploitRpcAdapter(client, poll_interval=0.1)
     check = adapter.check(spec, candidate, target, policy, timeout=2)
