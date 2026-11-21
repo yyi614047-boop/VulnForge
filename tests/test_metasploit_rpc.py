@@ -373,13 +373,9 @@ def test_timed_out_job_is_stopped_and_absence_is_confirmed(monkeypatch):
     import pytest
     from app.execution.metasploit_rpc import MetasploitJobCleanupError
 
-    values = iter([0.0, 0.5, 2.0, 2.0, 2.5])
-    last = [2.5]
-    def monotonic():
-        last[0] = next(values, last[0])
-        return last[0]
-    monkeypatch.setattr("app.execution.metasploit_rpc.time.monotonic", monotonic)
-    monkeypatch.setattr("app.execution.metasploit_rpc.time.sleep", lambda _: None)
+    clock = [0.0]
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.sleep", lambda _: clock.__setitem__(0, clock[0] + 2.0))
     client = FakeClient([
         ("module.results", {"status": "running"}),
         ("job.stop", True),
@@ -395,16 +391,13 @@ def test_timed_out_job_fails_closed_when_stop_cannot_be_confirmed(monkeypatch):
     import pytest
     from app.execution.metasploit_rpc import MetasploitJobCleanupError
 
-    values = iter([0.0, 0.5, 2.0, 2.0, 2.5])
-    last = [2.5]
-    def monotonic():
-        last[0] = next(values, last[0])
-        return last[0]
-    monkeypatch.setattr("app.execution.metasploit_rpc.time.monotonic", monotonic)
-    monkeypatch.setattr("app.execution.metasploit_rpc.time.sleep", lambda _: None)
+    clock = [0.0]
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("app.execution.metasploit_rpc.time.sleep", lambda _: clock.__setitem__(0, clock[0] + 2.0))
     client = FakeClient([
         ("module.results", {"status": "running"}),
         ("job.stop", True),
+        ("job.list", {"7": "exploit/demo"}),
         ("job.list", {"7": "exploit/demo"}),
     ])
     adapter = MetasploitRpcAdapter(client, poll_interval=0.1, job_cleanup_timeout=0.2)
