@@ -31,6 +31,10 @@ class MetasploitRpcError(RuntimeError):
     pass
 
 
+class MetasploitJobCleanupError(MetasploitRpcError):
+    """Raised when a timed-out Metasploit job cannot be confirmed stopped."""
+
+
 class MessagePackHttpTransport:
     """Small HTTP MessagePack transport for the Metasploit Framework RPC API."""
 
@@ -93,8 +97,10 @@ class DockerExecMessagePackTransport:
             raise ValueError("Invalid Metasploit Docker container name")
         if not 1 <= port <= 65535 or not 1 <= timeout <= 120:
             raise ValueError("Invalid Metasploit RPC port or timeout")
-        if not endpoint.startswith("/") or ".." in endpoint.split("/"):
-            raise ValueError("RPC endpoint must be an absolute, traversal-free path")
+        if (not isinstance(endpoint, str)
+                or not re.fullmatch(r"/[A-Za-z0-9._~/-]*", endpoint)
+                or ".." in endpoint.split("/")):
+            raise ValueError("RPC endpoint must be an absolute, traversal-free path with safe characters")
         self.container, self.port, self.endpoint = container, port, endpoint
         self.timeout, self.runner = timeout, runner
 
@@ -162,7 +168,7 @@ STDOUT.write(Base64.strict_encode64(response.body))
 class MetasploitRpcClient:
     """Authenticated RPC client with a narrow, explicit API allowlist."""
 
-    ALLOWED_METHODS = {"core.version", "module.check", "module.execute", "module.results", "job.stop", "session.list", "session.stop"}
+    ALLOWED_METHODS = {"core.version", "module.check", "module.execute", "module.results", "job.list", "job.stop", "session.list", "session.stop"}
 
     def __init__(self, transport, *, username: str, password: str):
         if not username or not password:
@@ -221,11 +227,15 @@ class MetasploitRpcClient:
 class MetasploitRpcAdapter:
     """Run module.check and module.execute only for explicitly approved lab candidates."""
 
-    def __init__(self, client: MetasploitRpcClient, *, poll_interval: float = 0.5):
+    def __init__(self, client: MetasploitRpcClient, *, poll_interval: float = 0.5,
+                 job_cleanup_timeout: float = 5.0):
         if not 0.1 <= poll_interval <= 5:
             raise ValueError("poll_interval must be between 0.1 and 5 seconds")
+        if not 0.1 <= job_cleanup_timeout <= 30:
+            raise ValueError("job_cleanup_timeout must be between 0.1 and 30 seconds")
         self.client = client
         self.poll_interval = poll_interval
+        self.job_cleanup_timeout = job_cleanup_timeout
         self._validated_checks: dict[str, tuple[str, str, str]] = {}
 
     @staticmethod
@@ -292,6 +302,36 @@ class MetasploitRpcAdapter:
             compatibility_status=spec.compatibility_status,
         )
 
+    def _stop_job_and_confirm(self, job_id: int, job_uuid: str) -> None:
+        """Stop a timed-out job and confirm it is absent from Metasploit's active job list."""
+        stop_error = None
+        try:
+            self.client.call("job.stop", job_id)
+        except Exception as exc:
+            stop_error = exc
+
+        deadline = time.monotonic() + self.job_cleanup_timeout
+        while True:
+            try:
+                active_jobs = self.client.call("job.list")
+            except Exception as exc:
+                detail = f"; job.stop error: {stop_error}" if stop_error else ""
+                raise MetasploitJobCleanupError(
+                    f"Could not confirm Metasploit job {job_uuid} stopped: job.list failed: {exc}{detail}"
+                ) from exc
+            if not isinstance(active_jobs, dict):
+                raise MetasploitJobCleanupError(
+                    f"Could not confirm Metasploit job {job_uuid} stopped: malformed job.list response"
+                )
+            if str(job_id) not in {str(key) for key in active_jobs}:
+                return
+            if time.monotonic() >= deadline:
+                detail = f"; job.stop error: {stop_error}" if stop_error else ""
+                raise MetasploitJobCleanupError(
+                    f"Metasploit job {job_uuid} remained active after stop request{detail}"
+                )
+            time.sleep(min(self.poll_interval, max(0, deadline - time.monotonic())))
+
     def _wait_for_result(self, job_id: int, job_uuid: str, timeout: int) -> dict:
         if not 1 <= timeout <= 300:
             raise ValueError("Metasploit job timeout must be between 1 and 300 seconds")
@@ -303,14 +343,11 @@ class MetasploitRpcAdapter:
             status = str(result.get("status", "")).lower()
             if status == "completed":
                 return result
-            if status in {"failed", "error"}:
+            if status in {"failed", "errored", "error"}:
                 raise MetasploitRpcError(f"Metasploit module job {status}: {result}")
-            time.sleep(self.poll_interval)
-        try:
-            self.client.call("job.stop", job_id)
-        except Exception:
-            pass
-        raise TimeoutError(f"Metasploit module job {job_uuid} exceeded {timeout} seconds")
+            time.sleep(min(self.poll_interval, max(0, deadline - time.monotonic())))
+        self._stop_job_and_confirm(job_id, job_uuid)
+        raise TimeoutError(f"Metasploit module job {job_uuid} exceeded {timeout} seconds; stop confirmed")
 
     def check(self, spec: PoCExecutionSpec, candidate: PoCCandidate,
               target: TargetSpec, policy: ExecutionPolicy, *, timeout: int = 60) -> MetasploitCheckOutcome:
