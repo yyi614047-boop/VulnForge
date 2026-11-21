@@ -10,7 +10,6 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from urllib.request import urlopen
 from uuid import uuid4
 
 import pytest
