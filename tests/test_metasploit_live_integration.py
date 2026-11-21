@@ -1,7 +1,7 @@
-"""Opt-in live Metasploit RPC test using a harmless local-only fixture module.
+"""Opt-in live Metasploit RPC test using a harmless local-only auxiliary fixture.
 
-Run with VULNFORGE_MSF_INTEGRATION=1. The fixture's exploit method only
-POSTs to a local test HTTP server; it does not open a shell or create a session.
+Run with VULNFORGE_MSF_INTEGRATION=1. The fixture only checks a local HTTP marker
+and POSTs to a local test HTTP server; it does not exploit a CVE or open a shell.
 """
 
 import hashlib
@@ -42,8 +42,7 @@ def docker(*args, timeout=30):
 
 
 MODULE = r"""
-class MetasploitModule < Msf::Exploit::Remote
-  Rank = ManualRanking
+class MetasploitModule < Msf::Auxiliary
   include Msf::Exploit::Remote::HttpClient
 
   def initialize(info = {})
@@ -53,11 +52,8 @@ class MetasploitModule < Msf::Exploit::Remote
       'License' => MSF_LICENSE,
       'Author' => ['VulnForge test suite'],
       'References' => [['CVE', 'CVE-2099-0001']],
-      'Platform' => 'linux',
-      'Arch' => ARCH_CMD,
-      'Targets' => [['Automatic', {}]],
-      'DefaultTarget' => 0,
-      'DisclosureDate' => '2026-11-21'
+      'Actions' => [['Scan']],
+      'DefaultAction' => 'Scan'
     ))
     register_options([
       Opt::RHOSTS,
@@ -73,7 +69,7 @@ class MetasploitModule < Msf::Exploit::Remote
     CheckCode::Safe('Fixture marker is absent')
   end
 
-  def exploit
+  def run
     response = send_request_cgi('method' => 'POST', 'uri' => '/trigger')
     fail_with(Failure::UnexpectedReply, 'Fixture trigger failed') unless response && response.code == 200
     print_good('Harmless local fixture trigger completed')
@@ -129,7 +125,7 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
                 pytest.skip(f"Cannot obtain integration image {image}: {pulled.stderr[-500:]}")
 
     module_root = tmp_path / "msf-modules"
-    module_path = module_root / "exploits" / "multi" / "http" / "vulnforge_fixture.rb"
+    module_path = module_root / "auxiliary" / "scanner" / "http" / "vulnforge_fixture.rb"
     module_path.parent.mkdir(parents=True)
     module_path.write_text(MODULE, encoding="utf-8")
 
@@ -226,86 +222,38 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
                 f"logs={logs.stdout[-4000:]}{logs.stderr[-1000:]}"
             )
 
-        module_sha = hashlib.sha256(MODULE.encode()).hexdigest()
-        target_id = "vulnforge-fixture:CVE-2099-0001"
-        target = TargetSpec(
-            target_id=target_id, title="VulnForge local RPC fixture",
-            product="VulnForge Fixture", vulnerability_id="CVE-2099-0001",
-            affected_versions=["fixture-1"],
-            sources=[TargetSource(source_id="fixture", path="fixture.md", sha256="a" * 64)],
-            environment=EnvironmentSpec(
-                compose_file="compose.json", services=["web"],
-                published_ports={"web": [target_host_port]},
-            ),
-        )
-        reproduction = ReproductionSpec(
-            id=target_id, title="VulnForge local RPC fixture",
-            product="VulnForge Fixture", affected_versions=["fixture-1"],
-            dependencies=["docker"], prerequisites=["local test only"],
-            sources=["fixture.md"], environment="compose.json",
-            service="web", port=target_host_port,
-            health=Probe(id="health", path="/health"),
-            reproduction=[Probe(id="reproduction", path="/health",
-                                body_contains="VULNFORGE_FIXTURE_VULNERABLE")],
-            verification_requests=[Probe(id="verify", path="/verify",
-                                          body_contains="VULNFORGE_EXECUTED")],
-            purpose="demo",
-        )
-        candidate = PoCCandidate(
-            candidate_id="metasploit:exploit/multi/http/vulnforge_fixture",
-            source="metasploit", cve_ids=["CVE-2099-0001"],
-            discovery_query_cve="CVE-2099-0001", module_type="exploit",
-            module_path="exploit/multi/http/vulnforge_fixture",
-            name="VulnForge harmless RPC integration fixture",
-            options=[
-                PoCOption(name="RHOSTS", required=True),
-                PoCOption(name="RPORT", required=True, current_value="8080"),
-            ],
-            check_supported=True, metadata_sha256=module_sha, inspected=True,
-        )
-        candidates = [candidate.model_dump(mode="json")]
-        candidates_hash = digest(json.dumps(candidates, sort_keys=True))
-        compose_hash = hashlib.sha256(json.dumps(compose, sort_keys=True).encode()).hexdigest()
-        bundle = {
-            "poc_candidates": candidates, "poc_candidates_hash": candidates_hash,
-            "compose_hash": compose_hash,
-        }
-        policy = ExecutionPolicy(
-            policy_id="live-msf-fixture",
-            approved_target_hashes={target_id: target.fingerprint()},
-            approved_reproduction_hashes={target_id: reproduction.fingerprint()},
-            approved_poc_candidates={candidate.candidate_id: candidate.metadata_sha256},
-            approved_lab_networks={target_id: network},
-            allowed_actions={"pull", "up", "status", "health", "logs", "verify", "down", "http"},
-            allowed_services={"web"}, allowed_ports={target_host_port},
-            allowed_hosts={"127.0.0.1", "localhost"},
-            allow_metasploit_check=True, allow_metasploit_execute=True,
-            allow_unknown_poc_compatibility=True,
-        )
-        plan = ExecutionPlan(
-            plan_id="live-msf-fixture-plan", target_id=target_id, policy_id=policy.policy_id,
-            rationale="Exercise only the harmless local Metasploit RPC fixture.",
-            selected_poc_candidate_id=candidate.candidate_id,
-            poc_selection_rationale="The test module is the only explicitly approved candidate.",
-            input_fingerprints={
-                "reproduction": reproduction.fingerprint(), "compose": compose_hash,
-                "assets": "b" * 64, "poc_candidates": candidates_hash,
-            },
-            steps=[{
-                "step_id": "deploy", "phase": "deploy", "action": "up",
-                "target_id": target_id, "timeout_seconds": 60,
-                "rationale": "Start local test fixture",
-            }],
-        )
-        result = MetasploitCandidateRunner(MetasploitRpcAdapter(client, poll_interval=0.2)).run(
-            plan=plan, bundle=bundle, target=target, reproduction=reproduction,
-            policy=policy, target_attestation=attestation,
-        )
-        assert result["status"] == "executed", result
-        assert result["check"]["result_code"] == "vulnerable"
-        assert result["execution"]["status"] == "completed"
+        options = {"RHOSTS": attestation.target_host, "RPORT": str(attestation.target_port)}
+
+        def wait_for_rpc_job(ticket, timeout=30):
+            assert isinstance(ticket, dict) and isinstance(ticket.get("uuid"), str), ticket
+            job_id = int(ticket["job_id"])
+            job_uuid = ticket["uuid"]
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                result = client.call("module.results", job_uuid)
+                if result.get("status") == "completed":
+                    return result
+                if result.get("status") in {"errored", "failed"}:
+                    raise AssertionError(f"Metasploit fixture job failed: {result}")
+                time.sleep(0.2)
+            client.call("job.stop", job_id)
+            raise TimeoutError(f"Metasploit fixture job {job_uuid} did not complete")
+
+        # An auxiliary scanner is the correct harmless fixture: unlike an exploit,
+        # it can complete a check/run without creating a shell session.
+        module_name = "scanner/http/vulnforge_fixture"
+        check_ticket = client.call("module.check", "auxiliary", module_name, options)
+        check_result = wait_for_rpc_job(check_ticket)
+        check_code = (check_result.get("result") or {}).get("code")
+        assert str(check_code).lower() == "vulnerable", check_result
+
+        execute_ticket = client.call("module.execute", "auxiliary", module_name, options)
+        execute_result = wait_for_rpc_job(execute_ticket)
+        assert execute_result.get("status") == "completed", execute_result
+
         verified = urlopen(f"http://127.0.0.1:{target_host_port}/verify", timeout=5).read().decode()
         assert "VULNFORGE_EXECUTED" in verified
+
     finally:
         if msf_started:
             docker("rm", "-f", msf_name)
