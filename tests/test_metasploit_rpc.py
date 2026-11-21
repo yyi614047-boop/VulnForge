@@ -440,3 +440,49 @@ def test_execute_preserves_timeout_and_reports_session_cleanup_failure(monkeypat
         adapter.execute(spec, candidate, target, policy, check, timeout=1)
     assert "session stop denied" in str(error.value)
     assert error.value.cleanup_errors
+
+
+def test_metasploit_rpc_calls_are_traced_without_credentials(tmp_path):
+    import json
+    from app.runtime.tracing import TraceRecorder
+
+    transport = FakeRpcTransport([
+        ("auth.login", {"result": "success", "token": "super-secret-token"}),
+        ("core.version", {"version": "6.4.0"}),
+    ])
+    client = MetasploitRpcClient(transport, username="trace-user", password="super-secret-password")
+    trace_path = tmp_path / "rpc.trace.jsonl"
+    with TraceRecorder(trace_path, "trace-run-001"):
+        assert client.call("core.version") == {"version": "6.4.0"}
+
+    events = [json.loads(line) for line in trace_path.read_text().splitlines()]
+    assert [event["event"] for event in events] == [
+        "metasploit.rpc.start", "metasploit.rpc.end",
+        "metasploit.rpc.start", "metasploit.rpc.end",
+    ]
+    trace_text = trace_path.read_text()
+    assert "super-secret-password" not in trace_text
+    assert "super-secret-token" not in trace_text
+
+
+def test_metasploit_job_lifecycle_is_traced(tmp_path):
+    import json
+    from app.runtime.tracing import TraceRecorder
+
+    target, candidate, spec, policy = fixture()
+    client = FakeClient([
+        ("module.check", {"job_id": 42, "uuid": "trace-job-uuid"}),
+        ("module.results", {"status": "completed", "result": {"code": "vulnerable"}}),
+    ])
+    adapter = MetasploitRpcAdapter(client, poll_interval=0.1)
+    trace_path = tmp_path / "job.trace.jsonl"
+    with TraceRecorder(trace_path, "trace-run-002"):
+        outcome = adapter.check(spec, candidate, target, policy, timeout=2)
+
+    events = [json.loads(line) for line in trace_path.read_text().splitlines()]
+    names = [event["event"] for event in events]
+    assert outcome.result_code == "vulnerable"
+    assert "metasploit.job.created" in names
+    assert "metasploit.job.wait.start" in names
+    assert "metasploit.job.completed" in names
+    assert all(event["run_id"] == "trace-run-002" for event in events)
