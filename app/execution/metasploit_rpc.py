@@ -184,7 +184,13 @@ class MetasploitRpcClient:
         if self.token is None:
             auth = self.transport.call("auth.login", self.username, self.password)
             if not isinstance(auth, dict) or auth.get("result") != "success" or not auth.get("token"):
-                raise MetasploitRpcError("Metasploit RPC authentication failed")
+                # Include only server diagnostics and response keys; never echo credentials or tokens.
+                detail = auth.get("error_message") or auth.get("error_class") if isinstance(auth, dict) else type(auth).__name__
+                keys = sorted(str(key) for key in auth.keys()) if isinstance(auth, dict) else []
+                raise MetasploitRpcError(
+                    f"Metasploit RPC authentication failed: {detail or 'unexpected auth response'}; "
+                    f"response_keys={keys}"
+                )
             self.token = str(auth["token"])
         response = self.transport.call(method, self.token, *params)
         if isinstance(response, dict) and response.get("error"):

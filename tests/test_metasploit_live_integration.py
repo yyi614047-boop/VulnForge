@@ -194,6 +194,18 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
             DockerExecMessagePackTransport(msf_name, port=55553, timeout=10),
             username="vulnforge", password=password,
         )
+        auth_probe = client.transport.call("auth.login", "vulnforge", password)
+        if not isinstance(auth_probe, dict) or auth_probe.get("result") != "success" or not auth_probe.get("token"):
+            safe_detail = (
+                auth_probe.get("error_message") or auth_probe.get("error_class")
+                if isinstance(auth_probe, dict) else type(auth_probe).__name__
+            )
+            safe_keys = sorted(str(key) for key in auth_probe.keys()) if isinstance(auth_probe, dict) else []
+            raise AssertionError(
+                f"Raw Metasploit auth.login failed: {safe_detail}; response_keys={safe_keys}"
+            )
+        client.token = str(auth_probe["token"])
+
         version = None
         last_error = None
         for _ in range(30):
