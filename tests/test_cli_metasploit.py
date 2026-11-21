@@ -1,5 +1,6 @@
 import json
 import sys
+from pathlib import Path
 
 from app import cli
 
@@ -36,7 +37,7 @@ def test_happy_path_cli_parses_short_flags_without_redundant_action_or_discovery
     ])
     assert args.identifier == "CVE-2021-25646"
     assert args.action == "run"
-    assert str(args.policy_file) == "policies/local.json"
+    assert args.policy_file == Path("policies/local.json")
     assert args.enable_metasploit_verification
     assert not args.enable_metasploit_execution
 
