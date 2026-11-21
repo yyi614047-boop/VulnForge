@@ -192,3 +192,15 @@ def test_pipeline_binds_optional_poc_discovery_into_research_and_plan(tmp_path):
     assert report["plan"]["input_fingerprints"]["poc_candidates"] == expected_hash
     assert report["plan"]["selected_poc_candidate_id"] is None
     assert "manual review" in report["plan"]["poc_selection_rationale"]
+
+
+def test_pipeline_writes_redacted_trace_with_stage_events(tmp_path):
+    from app.runtime.tracing import TraceRecorder, traced_call
+    import json
+    path = tmp_path / "test.trace.jsonl"
+    with TraceRecorder(path, "test-run"):
+        traced_call("model", "planner", {"api_key": "sk-verysecret"}, lambda: {"password": "sensitive"})
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    assert [event["event"] for event in events] == ["model.start", "model.end"]
+    assert "verysecret" not in path.read_text()
+    assert "sensitive" not in path.read_text()

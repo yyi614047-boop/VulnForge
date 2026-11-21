@@ -7,23 +7,35 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+import re
 
 
 _recorder = ContextVar("experiment_trace", default=None)
 
 
-def serializable(value):
+_SECRET_KEYS = re.compile(r"(password|passwd|secret|token|api[_-]?key|authorization|cookie|credential|private[_-]?key)", re.I)
+_SECRET_VALUES = re.compile(r"(?i)(bearer\\s+\\S+|sk-[A-Za-z0-9_-]{12,})")
+
+
+def serializable(value, *, depth=0):
+    """Bounded, redacted trace data; model/tool payloads are not persisted."""
+    if depth > 5:
+        return "[truncated]"
     if is_dataclass(value) and not isinstance(value, type):
-        return serializable(asdict(value))
+        return serializable(asdict(value), depth=depth + 1)
     if hasattr(value, "model_dump"):
-        return value.model_dump(mode="json")
+        return serializable(value.model_dump(mode="json"), depth=depth + 1)
     if isinstance(value, dict):
-        return {str(key): serializable(item) for key, item in value.items()}
+        return {str(key)[:100]: ("[REDACTED]" if _SECRET_KEYS.search(str(key))
+                else serializable(item, depth=depth + 1))
+                for key, item in list(value.items())[:40]}
     if isinstance(value, (list, tuple)):
-        return [serializable(item) for item in value]
-    if value is None or isinstance(value, (str, int, float, bool)):
+        return [serializable(item, depth=depth + 1) for item in value[:40]]
+    if isinstance(value, str):
+        return _SECRET_VALUES.sub("[REDACTED]", value[:500])
+    if value is None or isinstance(value, (int, float, bool)):
         return value
-    return str(value)
+    return f"<{type(value).__name__}>"
 
 
 class TraceRecorder:
@@ -62,14 +74,14 @@ def traced_call(category, name, parameters, function):
         return function()
     call_id = uuid4().hex
     started = time.monotonic()
-    emit(category + ".start", call_id=call_id, name=name, input=parameters)
+    emit(category + ".start", call_id=call_id, name=name, input_type=type(parameters).__name__)
     try:
         result = function()
     except BaseException as exc:
         emit(category + ".error", call_id=call_id, name=name,
-             error={"type": type(exc).__name__, "message": str(exc)},
+             error={"type": type(exc).__name__},
              duration_ms=round((time.monotonic() - started) * 1000, 3))
         raise
-    emit(category + ".end", call_id=call_id, name=name, output=result,
+    emit(category + ".end", call_id=call_id, name=name, output_type=type(result).__name__,
          duration_ms=round((time.monotonic() - started) * 1000, 3))
     return result

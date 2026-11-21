@@ -194,3 +194,7 @@ VULNFORGE_MSF_INTEGRATION=1 python -m pytest -q tests/test_metasploit_live_integ
 ```
 
 This test pulls the Metasploit Framework image and requires a working Docker daemon and Internet access for image pulls.
+
+## Run trace
+
+Every pipeline run writes a JSON Lines trace next to its report, named `reports/<project>.trace.jsonl`. The JSON report includes `trace_path`. The trace contains ordered stage transitions and model/tool call timing and status, with input/output payloads omitted by default to avoid recording prompts, credentials, or sensitive exploit data. This is an execution audit trail, **not** a deterministic replay engine.

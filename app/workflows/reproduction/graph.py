@@ -4,6 +4,7 @@ from threading import Lock
 import os
 
 from app.runtime.context import isolated_run, state_boundary
+from app.runtime.tracing import TraceRecorder, emit
 
 from app.agents.planner import StructuredPlanner
 from app.agents.recovery import RecoveryController
@@ -277,17 +278,34 @@ class Pipeline:
         executor_options.setdefault("recovery_budget", min(1, policy_recovery_budget)
                                      if self.recovery_controller is not None else 0)
         self.executor = StepExecutor(self.knowledge, self.workspace, self.project, report_path, **executor_options)
+        trace_path = report_path.with_suffix(".trace.jsonl")
+        if trace_path.exists():
+            raise FileExistsError("Trace exists; choose a new report path")
         state = {"identifier": identifier}
-        try:
-            state = graph.invoke(state)
-        except BaseException as exc:
-            if self.active:
-                self.executor.report.update(status="cancelled" if isinstance(exc, KeyboardInterrupt) else "execution_error", error=str(exc))
-            state.update(status="execution_error", error=str(exc))
-            state.update(self.cleanup(state))
-            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
-                raise
-        finally:
-            if "report" in state and not report_path.exists():
-                atomic_json(report_path, state["report"])
+        with TraceRecorder(trace_path, self.project):
+            emit("run.start", identifier=identifier, report=str(report_path))
+            try:
+                for update in graph.stream(state, stream_mode="updates"):
+                    for node, changes in update.items():
+                        if isinstance(changes, dict):
+                            state.update(changes)
+                            emit("stage.end", stage=node, status=state.get("status"),
+                                 updated_keys=sorted(changes))
+                emit("run.end", status=state.get("status"))
+            except BaseException as exc:
+                emit("run.error", error_type=type(exc).__name__)
+                if self.active:
+                    self.executor.report.update(status="cancelled" if isinstance(exc, KeyboardInterrupt) else "execution_error", error=str(exc))
+                state.update(status="execution_error", error=str(exc))
+                state.update(self.cleanup(state))
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+            finally:
+                if "report" in state:
+                    state["report"]["trace_path"] = str(trace_path)
+                    if self.executor.report is not None:
+                        self.executor.report["trace_path"] = str(trace_path)
+                        self.executor.save()
+                    elif not report_path.exists():
+                        atomic_json(report_path, state["report"])
         return state["report"]
