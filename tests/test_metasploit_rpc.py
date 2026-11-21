@@ -369,22 +369,14 @@ def test_docker_exec_transport_rejects_ruby_injection_in_endpoint():
         DockerExecMessagePackTransport("msf", endpoint="/api/'; system('id'); #")
 
 
-def test_docker_exec_transport_rejects_ruby_injection_in_endpoint():
-    import pytest
-    from app.execution.metasploit_rpc import DockerExecMessagePackTransport
-    with pytest.raises(ValueError, match="safe characters"):
-        DockerExecMessagePackTransport("msf", endpoint="/api/'; system('id'); #")
-
-
 def test_timed_out_job_is_stopped_and_absence_is_confirmed():
     import pytest
     from app.execution.metasploit_rpc import MetasploitJobCleanupError
 
-    client = FakeClient([
-        ("module.results", {"status": "running"}),
-        ("job.stop", True),
-        ("job.list", {}),
-    ])
+    client = FakeClient(
+        [("module.results", {"status": "running"}) for _ in range(12)]
+        + [("job.stop", True), ("job.list", {})]
+    )
     adapter = MetasploitRpcAdapter(client, poll_interval=0.1, job_cleanup_timeout=0.2)
     with pytest.raises(TimeoutError, match="stop confirmed"):
         adapter._wait_for_result(7, "timed-out-job", timeout=1)
@@ -395,13 +387,11 @@ def test_timed_out_job_fails_closed_when_stop_cannot_be_confirmed():
     import pytest
     from app.execution.metasploit_rpc import MetasploitJobCleanupError
 
-    client = FakeClient([
-        ("module.results", {"status": "running"}),
-        ("job.stop", True),
-        ("job.list", {"7": "exploit/demo"}),
-        ("job.list", {"7": "exploit/demo"}),
-        ("job.list", {"7": "exploit/demo"}),
-    ])
+    client = FakeClient(
+        [("module.results", {"status": "running"}) for _ in range(12)]
+        + [("job.stop", True)]
+        + [("job.list", {"7": "exploit/demo"}) for _ in range(5)]
+    )
     adapter = MetasploitRpcAdapter(client, poll_interval=0.1, job_cleanup_timeout=0.2)
     with pytest.raises(MetasploitJobCleanupError, match="remained active"):
         adapter._wait_for_result(7, "stuck-job", timeout=1)
