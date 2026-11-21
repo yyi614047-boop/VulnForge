@@ -27,6 +27,7 @@ from app.execution.metasploit_rpc import (
     DockerExecMessagePackTransport, MetasploitRpcAdapter, MetasploitRpcClient,
 )
 from app.workflows.reproduction.metasploit import MetasploitCandidateRunner
+from app.runtime.tracing import TraceRecorder
 
 
 pytestmark = pytest.mark.skipif(
@@ -257,13 +258,22 @@ def test_real_rpc_check_execute_and_independent_http_verification(tmp_path):
                                  rationale="Harmless local fixture")],
         )
         adapter = MetasploitRpcAdapter(client, poll_interval=0.2)
-        result = MetasploitCandidateRunner(adapter).run(
-            plan=plan, bundle=bundle, target=target, reproduction=reproduction,
-            policy=policy, target_attestation=attestation,
-        )
+        trace_path = tmp_path / "live-metasploit.trace.jsonl"
+        with TraceRecorder(trace_path, project):
+            result = MetasploitCandidateRunner(adapter).run(
+                plan=plan, bundle=bundle, target=target, reproduction=reproduction,
+                policy=policy, target_attestation=attestation,
+            )
         assert result["status"] == "executed", result
         assert result["check"]["result_code"] == "vulnerable", result
         assert result["execution"]["status"] == "completed", result
+
+        trace_text = trace_path.read_text(encoding="utf-8")
+        trace_events = [json.loads(line)["event"] for line in trace_text.splitlines()]
+        assert "metasploit.rpc.start" in trace_events
+        assert "metasploit.job.created" in trace_events
+        assert "metasploit.job.completed" in trace_events
+        assert "vf-test-" not in trace_text
 
         verified = urlopen(f"http://127.0.0.1:{target_host_port}/verify", timeout=5).read().decode()
         assert "VULNFORGE_EXECUTED" in verified, verified
